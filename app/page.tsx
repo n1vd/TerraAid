@@ -57,6 +57,7 @@ function SatelliteMap({ farms, selected, onSelect, date, location, layers, onSta
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Leaflet.Map|null>(null);
   const leafletRef = useRef<typeof import('leaflet')|null>(null);
+  const imageryBaseRef = useRef<Leaflet.TileLayer|null>(null);
   const satelliteRef = useRef<Leaflet.TileLayer.WMS|null>(null);
   const labelsRef = useRef<Leaflet.TileLayer|null>(null);
   const farmGroupRef = useRef<Leaflet.LayerGroup|null>(null);
@@ -74,15 +75,19 @@ function SatelliteMap({ farms, selected, onSelect, date, location, layers, onSta
       L.control.zoom({position:'bottomright'}).addTo(map);
       mapRef.current = map;
       let errors = 0;
+      const imageryBase = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution:'Esri World Imagery', maxZoom:19,
+      });
+      imageryBase.addTo(map); imageryBaseRef.current = imageryBase;
       const sat = L.tileLayer.wms('https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi', {
         layers:'MODIS_Terra_CorrectedReflectance_TrueColor', format:'image/jpeg', transparent:false,
-        attribution:'NASA GIBS / NASA Earthdata', time:date, tileSize:256, maxZoom:19, maxNativeZoom:9,
+        attribution:'NASA GIBS / NASA Earthdata', time:date, tileSize:256, maxZoom:19, maxNativeZoom:9, opacity:.28,
       } as Leaflet.WMSOptions & {time:string});
       sat.on('loading',()=>onStatus('loading'));
       sat.on('load',()=>{ errors=0; onStatus('available'); });
       sat.on('tileerror',()=>{ errors += 1; if(errors>=3) onStatus('unavailable'); });
       sat.addTo(map); satelliteRef.current = sat;
-      const labels = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {opacity:.34, attribution:'© OpenStreetMap contributors', maxZoom:19});
+      const labels = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {opacity:.18, attribution:'© OpenStreetMap contributors', maxZoom:19});
       labels.addTo(map); labelsRef.current = labels;
       const flood = L.polygon([[15.168,76.892],[15.164,76.953],[15.148,76.958],[15.137,76.946],[15.122,76.959],[15.104,76.943],[15.109,76.897],[15.130,76.889]], {color:'#4E86B8',fillColor:'#4E86B8',fillOpacity:.2,weight:1.5,interactive:false});
       flood.addTo(map); floodRef.current=flood;
@@ -96,8 +101,9 @@ function SatelliteMap({ farms, selected, onSelect, date, location, layers, onSta
   useEffect(() => { if(!mapRef.current) return; mapRef.current.flyTo([location.lat,location.lon],14,{duration:1}); }, [location]);
   useEffect(() => { onStatus('loading'); satelliteRef.current?.setParams({layers:'MODIS_Terra_CorrectedReflectance_TrueColor',format:'image/jpeg',transparent:false,time:date} as Leaflet.WMSParams & {time:string}, false); satelliteRef.current?.redraw(); }, [date]);
   useEffect(() => {
-    const map=mapRef.current, sat=satelliteRef.current, labels=labelsRef.current, flood=floodRef.current;
+    const map=mapRef.current, base=imageryBaseRef.current, sat=satelliteRef.current, labels=labelsRef.current, flood=floodRef.current;
     if(!map) return;
+    if(base) layers.satellite ? base.addTo(map) : base.removeFrom(map);
     if(sat) layers.satellite ? sat.addTo(map) : sat.removeFrom(map);
     if(labels) layers.labels ? labels.addTo(map) : labels.removeFrom(map);
     if(flood) layers.flood ? flood.addTo(map) : flood.removeFrom(map);
@@ -121,13 +127,13 @@ function SatelliteMap({ farms, selected, onSelect, date, location, layers, onSta
 }
 
 export default function Home() {
-  const [view,setView]=useState<'overview'|'map'|'claims'|'analytics'|'alerts'>('overview');
+  const [view,setView]=useState<'overview'|'claims'|'analytics'|'alerts'>('overview');
   const [quick,setQuick]=useState<'all'|'missed'|'mismatch'>('all');
   const [priority,setPriority]=useState<'All'|Priority>('All');
   const [claim,setClaim]=useState<'All'|'Yes'|'No'>('All');
   const [damage,setDamage]=useState<'All'|Damage>('All');
   const [selected,setSelected]=useState<Farm|null>(null);
-  const [filtersOpen,setFiltersOpen]=useState(false);
+  const [filtersOpen,setFiltersOpen]=useState(true);
   const [date,setDate]=useState(latestDate());
   const [imageryStatus,setImageryStatus]=useState<'loading'|'available'|'unavailable'>('loading');
   const [location,setLocation]=useState({lat:15.1394,lon:76.9214,name:'Ballari, Karnataka'});
@@ -155,7 +161,7 @@ export default function Home() {
   const clearFilters=()=>{setQuick('all');setPriority('All');setClaim('All');setDamage('All');};
   const selectFarm=(farm:Farm)=>setSelected(farm);
   const filteredClaims=FARMS.filter(f=>f.Farm_ID.toLowerCase().includes(claimSearch.toLowerCase()));
-  const nav=[['overview','Overview'],['map','Map'],['claims','Claims'],['analytics','Analytics'],['alerts','Alerts']] as const;
+  const nav=[['overview','Overview'],['claims','Claims'],['analytics','Analytics'],['alerts','Alerts']] as const;
   const metrics=[['Farms analysed',counts.all],['Severely affected',counts.severe],['Claims received',counts.claims],['Potentially missed',counts.missed],['High priority',counts.high]];
   const severeAll=FARMS.filter(f=>severity(f)==='Severe');
   const severeClaimed=severeAll.filter(f=>f.Claim_Submitted==='Yes').length;
@@ -167,44 +173,46 @@ export default function Home() {
       <nav aria-label="Primary navigation">{nav.map(([id,label])=><button key={id} className={view===id?'active':''} onClick={()=>setView(id)}>{label}</button>)}</nav>
     </header>
     <section className="intro">
-      <div><h1>{view==='overview'||view==='map'?'Flood Impact Overview':view==='claims'?'Claims Review':view==='analytics'?'Damage Analytics':'Verification Alerts'}</h1><p><strong>{location.name}</strong><span>Post-flood agricultural assessment</span></p></div>
+      <div><h1>{view==='overview'?'Flood Impact Overview':view==='claims'?'Claims Review':view==='analytics'?'Damage Analytics':'Verification Alerts'}</h1><p><strong>{location.name}</strong><span>Post-flood agricultural assessment</span></p></div>
       <Dialog><DialogTrigger className="method"><Info size={14}/> Data &amp; method</DialogTrigger><DialogContent className="method-dialog"><DialogHeader><DialogTitle>Data &amp; method</DialogTitle><DialogDescription>TerraAid supports authorised human decisions; it does not approve or reject claims.</DialogDescription></DialogHeader><div className="method-list"><div><Satellite/><span><b>Satellite imagery</b><small>NASA GIBS MODIS Terra True Color. Historical date requests are sent to the live WMS service.</small></span></div><div><BarChart3/><span><b>Damage analysis</b><small>May combine flood evidence, vegetation change and automated change detection.</small></span></div><div><Database/><span><b>Prototype records</b><small>Claims and farm boundaries are synthetic demonstration data—not official cadastral parcels.</small></span></div><div><ShieldCheck/><span><b>Human authority</b><small>Field verification and final relief decisions remain with authorised officials.</small></span></div></div></DialogContent></Dialog>
     </section>
-    {(view==='overview'||view==='map') && <>
-      <section className="metric-grid">{metrics.map(([label,value],index)=><article className={`metric ${index===3?'critical':''}`} key={label}><strong>{value}</strong><span>{label}</span></article>)}</section>
-      <section className="workspace">
-        <section className="map-card">
-          <div className="map-toolbar">
-            <button className="filter-toggle" onClick={()=>setFiltersOpen(v=>!v)} aria-expanded={filtersOpen}><SlidersHorizontal size={14}/>Filters</button>
-            <form className="searchbox" onSubmit={searchLocation}><Search size={14}/><input aria-label="Search district, village or location" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search district, village or location…"/><button disabled={searching}>{searching?'Searching…':'Search'}</button></form>
-            <label className="date-control"><CalendarDays size={13}/><input aria-label="Satellite date" type="date" value={date} max={latestDate()} onInput={e=>setDate(e.currentTarget.value)}/></label>
-            <button className="latest" onClick={()=>setDate(latestDate())}><Satellite size={13}/>Latest available</button>
-            <span className={`map-status ${imageryStatus}`}><i/>{imageryStatus==='available'?'Satellite available':imageryStatus==='loading'?'Loading imagery':'Imagery unavailable'} <b>{visible.length} farms</b></span>
-          </div>
-          {locationError && <div className="location-error"><AlertTriangle size={13}/>{locationError}<button onClick={useCoords}>Use as coordinates</button></div>}
-          <div className="map-stage">
-            <SatelliteMap farms={visible} selected={selected} onSelect={selectFarm} date={date} location={location} layers={layers} onStatus={setImageryStatus}/>
-            {imageryStatus==='unavailable'&&<div className="satellite-error"><AlertTriangle/><b>Live satellite imagery temporarily unavailable.</b><small>Farm overlays remain visible. Try a nearby date.</small><button onClick={()=>{setImageryStatus('loading');satelliteRefocusHack(date,setDate)}}><RefreshCw/>Retry</button></div>}
-            {filtersOpen&&<aside className="filters">
-              <div className="panel-heading"><span>Filters and layers</span><div><button onClick={clearFilters}>Reset</button><button onClick={()=>setFiltersOpen(false)}>Close</button></div></div>
-              <button className={quick==='missed'?'filter-active':''} onClick={()=>selectQuick('missed')}><b>Potentially missed</b><small>Severe damage and no claim</small><em>{FARMS.filter(f=>f.Potentially_Missed).length}</em></button>
-              <button className={quick==='all'?'filter-active all-filter':''} onClick={()=>selectQuick('all')}><b>All assessed farms</b><small>Complete assessment</small><em>{FARMS.length}</em></button>
-              <button className={quick==='mismatch'?'filter-active':''} onClick={()=>selectQuick('mismatch')}><b>Evidence mismatch</b><small>Closer review advised</small><em>{FARMS.filter(f=>f.Evidence_Mismatch).length}</em></button>
-              <div className="filter-group"><label>Priority</label><select value={priority} onChange={e=>setPriority(e.target.value as typeof priority)}><option>All</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select></div>
-              <div className="filter-group"><label>Claim status</label><select value={claim} onChange={e=>setClaim(e.target.value as typeof claim)}><option value="All">All</option><option value="Yes">Submitted</option><option value="No">No claim</option></select></div>
-              <div className="filter-group"><label>Damage evidence</label><select value={damage} onChange={e=>setDamage(e.target.value as typeof damage)}><option>All</option><option>Severe</option><option>Moderate</option><option>Low</option></select></div>
-              <div className="layers"><label><input type="checkbox" checked={layers.satellite} onChange={()=>setLayers({...layers,satellite:!layers.satellite})}/><Satellite/>Satellite</label><label><input type="checkbox" checked={layers.farms} onChange={()=>setLayers({...layers,farms:!layers.farms})}/><Layers3/>Farm damage</label><label><input type="checkbox" checked={layers.flood} onChange={()=>setLayers({...layers,flood:!layers.flood})}/><span className="layer-dot blue"/>Flood extent</label><label><input type="checkbox" checked={layers.labels} onChange={()=>setLayers({...layers,labels:!layers.labels})}/><MapPin/>Labels</label></div>
-            </aside>}
-            <div className="legend"><b>Damage evidence</b><span><i className="red"/>Severely affected</span><span><i className="amber"/>Moderately affected</span><span><i className="green"/>No or minor damage</span><span><i className="purple"/>Potentially missed</span><span><i className="blue"/>Flooded area</span></div>
-            {selected&&<FarmPanel farm={selected} onClose={()=>setSelected(null)}/>} 
-          </div>
-          <footer><span><Crosshair size={11}/>{location.lat.toFixed(4)}, {location.lon.toFixed(4)}</span><span>NASA Earthdata and OpenStreetMap</span></footer>
+    {view==='overview' && <section className={`workspace ${filtersOpen?'':'panel-collapsed'}`}>
+      <aside className={`side-panel ${filtersOpen?'open':'closed'}`} aria-hidden={!filtersOpen}>
+        <div className="side-panel-head"><span>Assessment overview</span><button onClick={()=>setFiltersOpen(false)}>Hide</button></div>
+        <section className="metric-stack" aria-label="Assessment statistics">{metrics.map(([label,value])=><article className="metric" key={label}><strong>{value}</strong><span>{label}</span></article>)}</section>
+        <section className="side-section">
+          <h2>Location and imagery</h2>
+          <form className="searchbox" onSubmit={searchLocation}><Search size={14}/><input aria-label="Search district, village or location" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search location"/><button disabled={searching}>{searching?'…':'Search'}</button></form>
+          <label className="date-control"><span>Imagery date</span><div><CalendarDays size={13}/><input aria-label="Satellite date" type="date" value={date} max={latestDate()} onInput={e=>setDate(e.currentTarget.value)}/></div></label>
+          <button className="latest" onClick={()=>setDate(latestDate())}><Satellite size={13}/>Use latest imagery</button>
+          <span className={`map-status ${imageryStatus}`}><i/>{imageryStatus==='available'?'Satellite available':imageryStatus==='loading'?'Loading imagery':'Imagery unavailable'} <b>{visible.length} farms</b></span>
+          {locationError&&<div className="location-error"><AlertTriangle size={13}/><span>{locationError}</span><button onClick={useCoords}>Use coordinates</button></div>}
         </section>
+        <section className="side-section filters">
+          <div className="panel-heading"><span>Filters</span><button onClick={clearFilters}>Reset</button></div>
+          <button className={quick==='missed'?'filter-active':''} onClick={()=>selectQuick('missed')}><b>Potentially missed</b><small>Severe damage and no claim</small><em>{FARMS.filter(f=>f.Potentially_Missed).length}</em></button>
+          <button className={quick==='all'?'filter-active all-filter':''} onClick={()=>selectQuick('all')}><b>All assessed farms</b><small>Complete assessment</small><em>{FARMS.length}</em></button>
+          <button className={quick==='mismatch'?'filter-active':''} onClick={()=>selectQuick('mismatch')}><b>Evidence mismatch</b><small>Closer review advised</small><em>{FARMS.filter(f=>f.Evidence_Mismatch).length}</em></button>
+          <div className="filter-group"><label>Priority</label><select value={priority} onChange={e=>setPriority(e.target.value as typeof priority)}><option>All</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select></div>
+          <div className="filter-group"><label>Claim status</label><select value={claim} onChange={e=>setClaim(e.target.value as typeof claim)}><option value="All">All</option><option value="Yes">Submitted</option><option value="No">No claim</option></select></div>
+          <div className="filter-group"><label>Damage evidence</label><select value={damage} onChange={e=>setDamage(e.target.value as typeof damage)}><option>All</option><option>Severe</option><option>Moderate</option><option>Low</option></select></div>
+          <div className="layers"><b>Map layers</b><label><input type="checkbox" checked={layers.satellite} onChange={()=>setLayers({...layers,satellite:!layers.satellite})}/><Satellite/>Satellite imagery</label><label><input type="checkbox" checked={layers.farms} onChange={()=>setLayers({...layers,farms:!layers.farms})}/><Layers3/>Farm damage</label><label><input type="checkbox" checked={layers.flood} onChange={()=>setLayers({...layers,flood:!layers.flood})}/><span className="layer-dot blue"/>Flood extent</label><label><input type="checkbox" checked={layers.labels} onChange={()=>setLayers({...layers,labels:!layers.labels})}/><MapPin/>Place labels</label></div>
+        </section>
+      </aside>
+      <section className="map-card">
+        <div className="map-stage">
+          <SatelliteMap farms={visible} selected={selected} onSelect={selectFarm} date={date} location={location} layers={layers} onStatus={setImageryStatus}/>
+          <button className="panel-toggle" onClick={()=>setFiltersOpen(v=>!v)} aria-expanded={filtersOpen}><SlidersHorizontal size={14}/>{filtersOpen?'Hide panel':'Show panel'}</button>
+          {imageryStatus==='unavailable'&&<div className="satellite-error"><AlertTriangle/><b>Live satellite imagery temporarily unavailable.</b><small>Farm overlays remain visible. Try a nearby date.</small><button onClick={()=>{setImageryStatus('loading');satelliteRefocusHack(date,setDate)}}><RefreshCw/>Retry</button></div>}
+          <div className="legend"><b>Damage evidence</b><span><i className="red"/>Severely affected</span><span><i className="amber"/>Moderately affected</span><span><i className="green"/>No or minor damage</span><span><i className="purple"/>Potentially missed</span><span><i className="blue"/>Flooded area</span></div>
+          {selected&&<FarmPanel farm={selected} onClose={()=>setSelected(null)}/>} 
+        </div>
+        <footer><span><Crosshair size={11}/>{location.lat.toFixed(4)}, {location.lon.toFixed(4)}</span><span>Esri World Imagery, NASA Earthdata and OpenStreetMap</span></footer>
       </section>
-    </>}
-    {view==='claims'&&<ClaimsView farms={filteredClaims} search={claimSearch} onSearch={setClaimSearch} onOpen={farm=>{setSelected(farm);setView('map');}}/>}
+    </section>}
+    {view==='claims'&&<ClaimsView farms={filteredClaims} search={claimSearch} onSearch={setClaimSearch} onOpen={farm=>{setSelected(farm);setView('overview');}}/>}
     {view==='analytics'&&<AnalyticsView severityCounts={severityCounts} severeClaimed={severeClaimed} severeTotal={severeAll.length}/>} 
-    {view==='alerts'&&<AlertsView farms={FARMS.filter(f=>f.Potentially_Missed||f.Evidence_Mismatch||f.Priority==='HIGH')} onOpen={farm=>{setSelected(farm);setView('map');}}/>}
+    {view==='alerts'&&<AlertsView farms={FARMS.filter(f=>f.Potentially_Missed||f.Evidence_Mismatch||f.Priority==='HIGH')} onOpen={farm=>{setSelected(farm);setView('overview');}}/>}
   </main>;
 }
 
