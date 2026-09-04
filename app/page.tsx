@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type * as Leaflet from 'leaflet';
-import { AlertTriangle, BarChart3, CalendarDays, Crosshair, Database, Info, Layers3, Leaf, MapPin, RefreshCw, Satellite, Search, ShieldCheck, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, BarChart3, Bell, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, ClipboardList, Clock3, Crosshair, Database, FileText, Flag, Info, Layers3, LayoutDashboard, Leaf, Map, MapPin, RefreshCw, Satellite, Search, ShieldCheck, SlidersHorizontal, Sprout, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
@@ -161,29 +161,61 @@ export default function Home() {
   const clearFilters=()=>{setQuick('all');setPriority('All');setClaim('All');setDamage('All');};
   const selectFarm=(farm:Farm)=>setSelected(farm);
   const filteredClaims=FARMS.filter(f=>f.Farm_ID.toLowerCase().includes(claimSearch.toLowerCase()));
-  const nav=[['overview','Overview'],['claims','Claims'],['analytics','Analytics'],['alerts','Alerts']] as const;
-  const metrics=[['Farms analysed',counts.all],['Severely affected',counts.severe],['Claims received',counts.claims],['Potentially missed',counts.missed],['High priority',counts.high]];
+  const nav=[
+    {id:'overview' as const,label:'Overview',icon:<LayoutDashboard/>},
+    {id:'claims' as const,label:'Claims',icon:<FileText/>},
+    {id:'analytics' as const,label:'Analytics',icon:<BarChart3/>},
+    {id:'alerts' as const,label:'Alerts',icon:<Bell/>},
+  ];
+  const metrics=[
+    {label:'Farms analysed',value:counts.all,icon:<LayoutDashboard/>},
+    {label:'Severely affected',value:counts.severe,icon:<Sprout/>},
+    {label:'Claims received',value:counts.claims,icon:<ClipboardList/>},
+    {label:'Potentially missed',value:counts.missed,icon:<Search/>},
+    {label:'High priority',value:counts.high,icon:<Flag/>},
+  ];
   const severeAll=FARMS.filter(f=>severity(f)==='Severe');
   const severeClaimed=severeAll.filter(f=>f.Claim_Submitted==='Yes').length;
   const severityCounts={severe:FARMS.filter(f=>severity(f)==='Severe').length,moderate:FARMS.filter(f=>severity(f)==='Moderate').length,low:FARMS.filter(f=>severity(f)==='Low').length};
 
+  const currentTitle=view==='overview'?'Flood Impact Overview':view==='claims'?'Claims Review':view==='analytics'?'Damage Analytics':'Verification Alerts';
+
   return <main className="shell">
+    <header className="app-topbar">
+      <div className="topbar-brand-zone">
+        <button className="brand" onClick={()=>setView('overview')}><span className="brand-mark"><Leaf size={19}/></span><strong>TerraAid</strong></button>
+      </div>
+      <div className="topbar-main">
+        <span className="live-pill"><i/>Live</span>
+        <div className="breadcrumb"><span>{location.name}</span><ChevronRight/><strong>{currentTitle}</strong></div>
+        <div className="topbar-actions">
+          <button className="notification" aria-label="3 notifications"><Bell/><em>3</em></button>
+          <button className="user-menu" aria-label="Open user menu"><span>AD</span><ChevronDown/></button>
+        </div>
+      </div>
+    </header>
     <aside className="nav-sidebar">
-      <button className="brand" onClick={()=>setView('overview')}><span className="brand-mark"><Leaf size={19}/></span><strong>TerraAid</strong></button>
-      <nav aria-label="Primary navigation">{nav.map(([id,label])=><button key={id} className={view===id?'active':''} onClick={()=>setView(id)}>{label}</button>)}</nav>
+      <nav aria-label="Primary navigation">{nav.map(item=><button key={item.id} className={view===item.id?'active':''} onClick={()=>setView(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav>
+      <aside className="sidebar-note"><Leaf/><p>TerraAid is built to support evidence-based decisions and faster recovery.</p></aside>
     </aside>
     <div className="page-content">
     <section className="intro">
-      <div><h1>{view==='overview'?'Flood Impact Overview':view==='claims'?'Claims Review':view==='analytics'?'Damage Analytics':'Verification Alerts'}</h1><p><strong>{location.name}</strong><span>Post-flood agricultural assessment</span></p></div>
+      <div><h1>{currentTitle}</h1><div className="header-meta"><strong>{location.name}</strong><span className="verified"><CheckCircle2/></span><span className="assessment-tag">Post-flood agricultural assessment</span></div><p className="intro-description">Monitor flood impact on agricultural farms, track affected areas, and manage claims.</p></div>
       <Dialog><DialogTrigger className="method"><Info size={14}/> Data &amp; method</DialogTrigger><DialogContent className="method-dialog"><DialogHeader><DialogTitle>Data &amp; method</DialogTitle><DialogDescription>TerraAid supports authorised human decisions; it does not approve or reject claims.</DialogDescription></DialogHeader><div className="method-list"><div><Satellite/><span><b>Satellite imagery</b><small>NASA GIBS MODIS Terra True Color. Historical date requests are sent to the live WMS service.</small></span></div><div><BarChart3/><span><b>Damage analysis</b><small>May combine flood evidence, vegetation change and automated change detection.</small></span></div><div><Database/><span><b>Prototype records</b><small>Claims and farm boundaries are synthetic demonstration data—not official cadastral parcels.</small></span></div><div><ShieldCheck/><span><b>Human authority</b><small>Field verification and final relief decisions remain with authorised officials.</small></span></div></div></DialogContent></Dialog>
     </section>
     {view==='overview' && <>
-      <section className="metric-grid">{metrics.map(([label,value])=><article className="metric" key={label}><strong>{value}</strong><span>{label}</span></article>)}</section>
+      <section className="metric-grid">{metrics.map(metric=><article className="metric" key={metric.label}><span className="metric-icon">{metric.icon}</span><div><strong>{metric.value}</strong><span>{metric.label}</span></div></article>)}</section>
+      <section className="info-strip" aria-label="Assessment summary">
+        <article><Clock3/><div><strong>Severe impact detected</strong><span>7 farms need immediate attention</span></div></article>
+        <article><Map/><div><strong>Coverage</strong><span>20 farms • Ballari, Karnataka</span></div></article>
+        <article><Database/><div><strong>Data source</strong><span>Satellite imagery &amp; field data</span></div></article>
+        <article><CalendarDays/><div><strong>Last updated</strong><span>09/02/2026 • 10:30 AM IST</span></div></article>
+      </section>
       <section className="workspace">
         <section className="map-card">
           <div className="map-toolbar">
             <button className="filter-toggle" onClick={()=>setFiltersOpen(v=>!v)} aria-expanded={filtersOpen}><SlidersHorizontal size={14}/>Filters</button>
-            <form className="searchbox" onSubmit={searchLocation}><Search size={14}/><input aria-label="Search district, village or location" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search district, village or location…"/><button disabled={searching}>{searching?'Searching…':'Search'}</button></form>
+            <form className="location-search" onSubmit={searchLocation}><div className="searchbox"><Search size={14}/><input aria-label="Search district, village or location" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search district, village or location…"/>{query&&<button className="search-clear" type="button" aria-label="Clear search" onClick={()=>setQuery('')}><X/></button>}</div><button className="search-submit" disabled={searching}>{searching?'Searching…':'Search'}</button></form>
             <label className="date-control"><CalendarDays size={13}/><input aria-label="Satellite date" type="date" value={date} max={latestDate()} onInput={e=>setDate(e.currentTarget.value)}/></label>
             <button className="latest" onClick={()=>setDate(latestDate())}><Satellite size={13}/>Latest available</button>
             <span className={`map-status ${imageryStatus}`}><i/>{imageryStatus==='available'?'Satellite available':imageryStatus==='loading'?'Loading imagery':'Imagery unavailable'} <b>{visible.length} farms</b></span>
