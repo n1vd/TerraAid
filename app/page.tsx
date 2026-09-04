@@ -133,7 +133,7 @@ export default function Home() {
   const [claim,setClaim]=useState<'All'|'Yes'|'No'>('All');
   const [damage,setDamage]=useState<'All'|Damage>('All');
   const [selected,setSelected]=useState<Farm|null>(null);
-  const [filtersOpen,setFiltersOpen]=useState(true);
+  const [filtersOpen,setFiltersOpen]=useState(false);
   const [date,setDate]=useState(latestDate());
   const [imageryStatus,setImageryStatus]=useState<'loading'|'available'|'unavailable'>('loading');
   const [location,setLocation]=useState({lat:15.1394,lon:76.9214,name:'Ballari, Karnataka'});
@@ -168,51 +168,51 @@ export default function Home() {
   const severityCounts={severe:FARMS.filter(f=>severity(f)==='Severe').length,moderate:FARMS.filter(f=>severity(f)==='Moderate').length,low:FARMS.filter(f=>severity(f)==='Low').length};
 
   return <main className="shell">
-    <header className="topbar">
+    <aside className="nav-sidebar">
       <button className="brand" onClick={()=>setView('overview')}><span className="brand-mark"><Leaf size={19}/></span><strong>TerraAid</strong></button>
       <nav aria-label="Primary navigation">{nav.map(([id,label])=><button key={id} className={view===id?'active':''} onClick={()=>setView(id)}>{label}</button>)}</nav>
-    </header>
+    </aside>
+    <div className="page-content">
     <section className="intro">
       <div><h1>{view==='overview'?'Flood Impact Overview':view==='claims'?'Claims Review':view==='analytics'?'Damage Analytics':'Verification Alerts'}</h1><p><strong>{location.name}</strong><span>Post-flood agricultural assessment</span></p></div>
       <Dialog><DialogTrigger className="method"><Info size={14}/> Data &amp; method</DialogTrigger><DialogContent className="method-dialog"><DialogHeader><DialogTitle>Data &amp; method</DialogTitle><DialogDescription>TerraAid supports authorised human decisions; it does not approve or reject claims.</DialogDescription></DialogHeader><div className="method-list"><div><Satellite/><span><b>Satellite imagery</b><small>NASA GIBS MODIS Terra True Color. Historical date requests are sent to the live WMS service.</small></span></div><div><BarChart3/><span><b>Damage analysis</b><small>May combine flood evidence, vegetation change and automated change detection.</small></span></div><div><Database/><span><b>Prototype records</b><small>Claims and farm boundaries are synthetic demonstration data—not official cadastral parcels.</small></span></div><div><ShieldCheck/><span><b>Human authority</b><small>Field verification and final relief decisions remain with authorised officials.</small></span></div></div></DialogContent></Dialog>
     </section>
-    {view==='overview' && <section className={`workspace ${filtersOpen?'':'panel-collapsed'}`}>
-      <aside className={`side-panel ${filtersOpen?'open':'closed'}`} aria-hidden={!filtersOpen}>
-        <div className="side-panel-head"><span>Assessment overview</span><button onClick={()=>setFiltersOpen(false)}>Hide</button></div>
-        <section className="metric-stack" aria-label="Assessment statistics">{metrics.map(([label,value])=><article className="metric" key={label}><strong>{value}</strong><span>{label}</span></article>)}</section>
-        <section className="side-section">
-          <h2>Location and imagery</h2>
-          <form className="searchbox" onSubmit={searchLocation}><Search size={14}/><input aria-label="Search district, village or location" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search location"/><button disabled={searching}>{searching?'…':'Search'}</button></form>
-          <label className="date-control"><span>Imagery date</span><div><CalendarDays size={13}/><input aria-label="Satellite date" type="date" value={date} max={latestDate()} onInput={e=>setDate(e.currentTarget.value)}/></div></label>
-          <button className="latest" onClick={()=>setDate(latestDate())}><Satellite size={13}/>Use latest imagery</button>
-          <span className={`map-status ${imageryStatus}`}><i/>{imageryStatus==='available'?'Satellite available':imageryStatus==='loading'?'Loading imagery':'Imagery unavailable'} <b>{visible.length} farms</b></span>
+    {view==='overview' && <>
+      <section className="metric-grid">{metrics.map(([label,value])=><article className="metric" key={label}><strong>{value}</strong><span>{label}</span></article>)}</section>
+      <section className="workspace">
+        <section className="map-card">
+          <div className="map-toolbar">
+            <button className="filter-toggle" onClick={()=>setFiltersOpen(v=>!v)} aria-expanded={filtersOpen}><SlidersHorizontal size={14}/>Filters</button>
+            <form className="searchbox" onSubmit={searchLocation}><Search size={14}/><input aria-label="Search district, village or location" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search district, village or location…"/><button disabled={searching}>{searching?'Searching…':'Search'}</button></form>
+            <label className="date-control"><CalendarDays size={13}/><input aria-label="Satellite date" type="date" value={date} max={latestDate()} onInput={e=>setDate(e.currentTarget.value)}/></label>
+            <button className="latest" onClick={()=>setDate(latestDate())}><Satellite size={13}/>Latest available</button>
+            <span className={`map-status ${imageryStatus}`}><i/>{imageryStatus==='available'?'Satellite available':imageryStatus==='loading'?'Loading imagery':'Imagery unavailable'} <b>{visible.length} farms</b></span>
+          </div>
           {locationError&&<div className="location-error"><AlertTriangle size={13}/><span>{locationError}</span><button onClick={useCoords}>Use coordinates</button></div>}
+          <div className="map-stage">
+            <SatelliteMap farms={visible} selected={selected} onSelect={selectFarm} date={date} location={location} layers={layers} onStatus={setImageryStatus}/>
+            {imageryStatus==='unavailable'&&<div className="satellite-error"><AlertTriangle/><b>Live satellite imagery temporarily unavailable.</b><small>Farm overlays remain visible. Try a nearby date.</small><button onClick={()=>{setImageryStatus('loading');satelliteRefocusHack(date,setDate)}}><RefreshCw/>Retry</button></div>}
+            {filtersOpen&&<aside className="filters">
+              <div className="panel-heading"><span>Filters and layers</span><div><button onClick={clearFilters}>Reset</button><button onClick={()=>setFiltersOpen(false)}>Close</button></div></div>
+              <button className={quick==='missed'?'filter-active':''} onClick={()=>selectQuick('missed')}><b>Potentially missed</b><small>Severe damage and no claim</small><em>{FARMS.filter(f=>f.Potentially_Missed).length}</em></button>
+              <button className={quick==='all'?'filter-active all-filter':''} onClick={()=>selectQuick('all')}><b>All assessed farms</b><small>Complete assessment</small><em>{FARMS.length}</em></button>
+              <button className={quick==='mismatch'?'filter-active':''} onClick={()=>selectQuick('mismatch')}><b>Evidence mismatch</b><small>Closer review advised</small><em>{FARMS.filter(f=>f.Evidence_Mismatch).length}</em></button>
+              <div className="filter-group"><label>Priority</label><select value={priority} onChange={e=>setPriority(e.target.value as typeof priority)}><option>All</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select></div>
+              <div className="filter-group"><label>Claim status</label><select value={claim} onChange={e=>setClaim(e.target.value as typeof claim)}><option value="All">All</option><option value="Yes">Submitted</option><option value="No">No claim</option></select></div>
+              <div className="filter-group"><label>Damage evidence</label><select value={damage} onChange={e=>setDamage(e.target.value as typeof damage)}><option>All</option><option>Severe</option><option>Moderate</option><option>Low</option></select></div>
+              <div className="layers"><label><input type="checkbox" checked={layers.satellite} onChange={()=>setLayers({...layers,satellite:!layers.satellite})}/><Satellite/>Satellite imagery</label><label><input type="checkbox" checked={layers.farms} onChange={()=>setLayers({...layers,farms:!layers.farms})}/><Layers3/>Farm damage</label><label><input type="checkbox" checked={layers.flood} onChange={()=>setLayers({...layers,flood:!layers.flood})}/><span className="layer-dot blue"/>Flood extent</label><label><input type="checkbox" checked={layers.labels} onChange={()=>setLayers({...layers,labels:!layers.labels})}/><MapPin/>Place labels</label></div>
+            </aside>}
+            <div className="legend"><b>Damage evidence</b><span><i className="red"/>Severely affected</span><span><i className="amber"/>Moderately affected</span><span><i className="green"/>No or minor damage</span><span><i className="purple"/>Potentially missed</span><span><i className="blue"/>Flooded area</span></div>
+            {selected&&<FarmPanel farm={selected} onClose={()=>setSelected(null)}/>}
+          </div>
+          <footer><span><Crosshair size={11}/>{location.lat.toFixed(4)}, {location.lon.toFixed(4)}</span><span>Esri World Imagery, NASA Earthdata and OpenStreetMap</span></footer>
         </section>
-        <section className="side-section filters">
-          <div className="panel-heading"><span>Filters</span><button onClick={clearFilters}>Reset</button></div>
-          <button className={quick==='missed'?'filter-active':''} onClick={()=>selectQuick('missed')}><b>Potentially missed</b><small>Severe damage and no claim</small><em>{FARMS.filter(f=>f.Potentially_Missed).length}</em></button>
-          <button className={quick==='all'?'filter-active all-filter':''} onClick={()=>selectQuick('all')}><b>All assessed farms</b><small>Complete assessment</small><em>{FARMS.length}</em></button>
-          <button className={quick==='mismatch'?'filter-active':''} onClick={()=>selectQuick('mismatch')}><b>Evidence mismatch</b><small>Closer review advised</small><em>{FARMS.filter(f=>f.Evidence_Mismatch).length}</em></button>
-          <div className="filter-group"><label>Priority</label><select value={priority} onChange={e=>setPriority(e.target.value as typeof priority)}><option>All</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select></div>
-          <div className="filter-group"><label>Claim status</label><select value={claim} onChange={e=>setClaim(e.target.value as typeof claim)}><option value="All">All</option><option value="Yes">Submitted</option><option value="No">No claim</option></select></div>
-          <div className="filter-group"><label>Damage evidence</label><select value={damage} onChange={e=>setDamage(e.target.value as typeof damage)}><option>All</option><option>Severe</option><option>Moderate</option><option>Low</option></select></div>
-          <div className="layers"><b>Map layers</b><label><input type="checkbox" checked={layers.satellite} onChange={()=>setLayers({...layers,satellite:!layers.satellite})}/><Satellite/>Satellite imagery</label><label><input type="checkbox" checked={layers.farms} onChange={()=>setLayers({...layers,farms:!layers.farms})}/><Layers3/>Farm damage</label><label><input type="checkbox" checked={layers.flood} onChange={()=>setLayers({...layers,flood:!layers.flood})}/><span className="layer-dot blue"/>Flood extent</label><label><input type="checkbox" checked={layers.labels} onChange={()=>setLayers({...layers,labels:!layers.labels})}/><MapPin/>Place labels</label></div>
-        </section>
-      </aside>
-      <section className="map-card">
-        <div className="map-stage">
-          <SatelliteMap farms={visible} selected={selected} onSelect={selectFarm} date={date} location={location} layers={layers} onStatus={setImageryStatus}/>
-          <button className="panel-toggle" onClick={()=>setFiltersOpen(v=>!v)} aria-expanded={filtersOpen}><SlidersHorizontal size={14}/>{filtersOpen?'Hide panel':'Show panel'}</button>
-          {imageryStatus==='unavailable'&&<div className="satellite-error"><AlertTriangle/><b>Live satellite imagery temporarily unavailable.</b><small>Farm overlays remain visible. Try a nearby date.</small><button onClick={()=>{setImageryStatus('loading');satelliteRefocusHack(date,setDate)}}><RefreshCw/>Retry</button></div>}
-          <div className="legend"><b>Damage evidence</b><span><i className="red"/>Severely affected</span><span><i className="amber"/>Moderately affected</span><span><i className="green"/>No or minor damage</span><span><i className="purple"/>Potentially missed</span><span><i className="blue"/>Flooded area</span></div>
-          {selected&&<FarmPanel farm={selected} onClose={()=>setSelected(null)}/>} 
-        </div>
-        <footer><span><Crosshair size={11}/>{location.lat.toFixed(4)}, {location.lon.toFixed(4)}</span><span>Esri World Imagery, NASA Earthdata and OpenStreetMap</span></footer>
       </section>
-    </section>}
+    </>}
     {view==='claims'&&<ClaimsView farms={filteredClaims} search={claimSearch} onSearch={setClaimSearch} onOpen={farm=>{setSelected(farm);setView('overview');}}/>}
     {view==='analytics'&&<AnalyticsView severityCounts={severityCounts} severeClaimed={severeClaimed} severeTotal={severeAll.length}/>} 
     {view==='alerts'&&<AlertsView farms={FARMS.filter(f=>f.Potentially_Missed||f.Evidence_Mismatch||f.Priority==='HIGH')} onOpen={farm=>{setSelected(farm);setView('overview');}}/>}
+    </div>
   </main>;
 }
 
