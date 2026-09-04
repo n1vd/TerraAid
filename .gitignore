@@ -37,3 +37,10 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+/.package-stage-*/
+/terraaid-site-*.tar.gz
+
+# local tooling caches
+/.cache/
+/.turbo/
+*.log
