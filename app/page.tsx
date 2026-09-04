@@ -48,12 +48,15 @@ const centers: [number, number][] = [
 const farmBoundary=(center:[number,number],index:number,pattern:'blocks'|'riverside'|'clusters'):[number,number][]=>{
   const [lat,lon]=center;
   if(pattern==='riverside'){
-    const width=.0015+(index%3)*.00035, length=.0064+(index%4)*.0007, slant=(index%2?.0012:-.001);
-    return [[lat-width,lon-length],[lat+width*.82,lon-length+slant],[lat+width,lon+length],[lat-width*.72,lon+length-slant]];
+    const width=.0035+(index%3)*.00055, length=.0056+(index%4)*.00065, angle=-.14+(index%5)*.055;
+    const rotate=(north:number,east:number):[number,number]=>[lat+north*Math.cos(angle)-east*Math.sin(angle),lon+north*Math.sin(angle)+east*Math.cos(angle)];
+    return [rotate(-width,-length),rotate(width*.78,-length*.94),rotate(width,length),rotate(-width*.82,length*.9)];
   }
   if(pattern==='clusters'){
-    const sx=.0028+(index%4)*.00075, sy=.0035+(index%3)*.001;
-    return [[lat-sx*.9,lon-sy*.45],[lat-sx*.2,lon-sy],[lat+sx*.86,lon-sy*.56],[lat+sx,lon+sy*.48],[lat+sx*.05,lon+sy],[lat-sx,lon+sy*.42]];
+    const sx=.0046+(index%4)*.00085, sy=.0058+(index%3)*.00115, angle=-.2+(index%6)*.07;
+    const rotate=(north:number,east:number):[number,number]=>[lat+north*Math.cos(angle)-east*Math.sin(angle),lon+north*Math.sin(angle)+east*Math.cos(angle)];
+    if(index%2===0) return [rotate(-sx,-sy*.82),rotate(sx*.78,-sy),rotate(sx,sy*.76),rotate(-sx*.7,sy)];
+    return [rotate(-sx*.9,-sy*.6),rotate(sx*.08,-sy),rotate(sx*.92,-sy*.48),rotate(sx*.78,sy*.84),rotate(-sx,sy*.72)];
   }
   const sx=.0046+(index%3)*.0005, sy=.0055+(index%2)*.0006;
   return [[lat-sx,lon-sy],[lat+sx*.78,lon-sy*.84],[lat+sx,lon+sy*.82],[lat-sx*.72,lon+sy]];
@@ -70,8 +73,8 @@ const buildRegionFarms=(prefix:'S'|'D',regionCenters:[number,number][],pattern:'
   return {...source,Farm_ID:`${prefix}${String(index+1).padStart(3,'0')}`,Crop:['Paddy','Cotton','Maize','Groundnut','Millet'][(index+offset)%5],Area:Number((1.3+(index%7)*.38).toFixed(1)),Flood_Percent:Math.max(12,Math.min(93,aiDamage+7-(index%4)*3)),NDVI_Change:Math.max(9,aiDamage-16+(index%5)),AI_Damage_Percent:aiDamage,AI_Confidence:81+(index%13),Claim_Submitted:claimSubmitted,Claimed_Damage:claimSubmitted==='Yes'?claimed:0,Potentially_Missed:missed,Evidence_Mismatch:mismatch,Priority:missed||aiDamage>=74?'HIGH':aiDamage>=43?'MEDIUM':'LOW',Alert:missed?'Potentially missed':mismatch?'Evidence mismatch':aiDamage>=70?'Verify':aiDamage>=40?'Review':'Monitor',boundary:farmBoundary(center,index,pattern)};
 });
 
-const SITAPUR_CENTERS:[number,number][]=[[27.568,80.692],[27.574,80.707],[27.579,80.721],[27.585,80.736],[27.590,80.751],[27.596,80.767],[27.602,80.782],[27.608,80.798],[27.615,80.806],[27.621,80.790],[27.627,80.773],[27.633,80.757],[27.640,80.741],[27.646,80.724],[27.652,80.708],[27.658,80.692]];
-const DHEMAJI_CENTERS:[number,number][]=[[27.445,94.512],[27.454,94.548],[27.448,94.588],[27.463,94.628],[27.479,94.525],[27.486,94.566],[27.479,94.611],[27.504,94.641],[27.516,94.514],[27.524,94.553],[27.519,94.598],[27.541,94.624],[27.555,94.530],[27.564,94.576]];
+const SITAPUR_CENTERS:[number,number][]=[[27.589,80.717],[27.589,80.738],[27.590,80.759],[27.591,80.780],[27.601,80.713],[27.602,80.735],[27.602,80.757],[27.603,80.779],[27.613,80.719],[27.614,80.741],[27.614,80.763],[27.615,80.785],[27.625,80.715],[27.625,80.737],[27.626,80.759],[27.627,80.781]];
+const DHEMAJI_CENTERS:[number,number][]=[[27.480,94.542],[27.482,94.560],[27.479,94.579],[27.483,94.598],[27.481,94.616],[27.503,94.536],[27.505,94.555],[27.501,94.575],[27.504,94.595],[27.526,94.544],[27.524,94.562],[27.528,94.582],[27.525,94.602],[27.527,94.619]];
 const BALLARI_FARMS:Farm[]=rawFarms.map((farm,index)=>({...farm,boundary:farmBoundary(centers[index],index,'blocks')}));
 const REGIONS:Record<RegionId,Region>={
   ballari:{id:'ballari',name:'Ballari, Karnataka',lat:15.1394,lon:76.9214,zoom:14,updated:'09/02/2026 • 10:30 AM IST',farms:BALLARI_FARMS,floodBoundary:[[15.168,76.892],[15.164,76.953],[15.148,76.958],[15.137,76.946],[15.122,76.959],[15.104,76.943],[15.109,76.897],[15.130,76.889]]},
