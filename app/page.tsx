@@ -74,12 +74,12 @@ const buildRegionFarms=(prefix:'S'|'D',regionCenters:[number,number][],pattern:'
 });
 
 const SITAPUR_CENTERS:[number,number][]=[[27.589,80.717],[27.589,80.738],[27.590,80.759],[27.591,80.780],[27.601,80.713],[27.602,80.735],[27.602,80.757],[27.603,80.779],[27.613,80.719],[27.614,80.741],[27.614,80.763],[27.615,80.785],[27.625,80.715],[27.625,80.737],[27.626,80.759],[27.627,80.781]];
-const DHEMAJI_CENTERS:[number,number][]=[[27.480,94.542],[27.482,94.560],[27.479,94.579],[27.483,94.598],[27.481,94.616],[27.503,94.536],[27.505,94.555],[27.501,94.575],[27.504,94.595],[27.526,94.544],[27.524,94.562],[27.528,94.582],[27.525,94.602],[27.527,94.619]];
+const DHEMAJI_CENTERS:[number,number][]=[[27.451,94.520],[27.456,94.552],[27.449,94.590],[27.458,94.625],[27.482,94.506],[27.490,94.544],[27.479,94.584],[27.492,94.635],[27.520,94.510],[27.529,94.550],[27.517,94.592],[27.530,94.627],[27.554,94.536],[27.556,94.580]];
 const BALLARI_FARMS:Farm[]=rawFarms.map((farm,index)=>({...farm,boundary:farmBoundary(centers[index],index,'blocks')}));
 const REGIONS:Record<RegionId,Region>={
   ballari:{id:'ballari',name:'Ballari, Karnataka',lat:15.1394,lon:76.9214,zoom:14,updated:'09/02/2026 • 10:30 AM IST',farms:BALLARI_FARMS,floodBoundary:[[15.168,76.892],[15.164,76.953],[15.148,76.958],[15.137,76.946],[15.122,76.959],[15.104,76.943],[15.109,76.897],[15.130,76.889]]},
-  sitapur:{id:'sitapur',name:'Sitapur, Uttar Pradesh',lat:27.613,lon:80.751,zoom:13,updated:'09/02/2026 • 10:18 AM IST',farms:buildRegionFarms('S',SITAPUR_CENTERS,'riverside',2),floodBoundary:[[27.557,80.679],[27.570,80.708],[27.592,80.748],[27.616,80.817],[27.635,80.793],[27.610,80.735],[27.580,80.686]]},
-  dhemaji:{id:'dhemaji',name:'Dhemaji, Assam',lat:27.505,lon:94.575,zoom:13,updated:'09/02/2026 • 09:54 AM IST',farms:buildRegionFarms('D',DHEMAJI_CENTERS,'clusters',5),floodBoundary:[[27.430,94.495],[27.447,94.641],[27.492,94.660],[27.535,94.646],[27.577,94.602],[27.571,94.516],[27.519,94.492],[27.463,94.487]]},
+  sitapur:{id:'sitapur',name:'Sitapur, Uttar Pradesh',lat:27.609,lon:80.751,zoom:13,updated:'09/02/2026 • 10:18 AM IST',farms:buildRegionFarms('S',SITAPUR_CENTERS,'riverside',2),floodBoundary:[[27.575,80.747],[27.578,80.701],[27.595,80.697],[27.620,80.698],[27.640,80.704],[27.643,80.751],[27.638,80.800],[27.612,80.806],[27.578,80.798]]},
+  dhemaji:{id:'dhemaji',name:'Dhemaji, Assam',lat:27.505,lon:94.575,zoom:12,updated:'09/02/2026 • 09:54 AM IST',farms:buildRegionFarms('D',DHEMAJI_CENTERS,'clusters',5),floodBoundary:[[27.430,94.495],[27.447,94.641],[27.492,94.660],[27.535,94.646],[27.577,94.602],[27.571,94.516],[27.519,94.492],[27.463,94.487]]},
 };
 
 const latestDate = () => { const d = new Date(); d.setDate(d.getDate()-2); return d.toISOString().slice(0,10); };
