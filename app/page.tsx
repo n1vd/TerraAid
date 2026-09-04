@@ -83,19 +83,20 @@ const REGIONS:Record<RegionId,Region>={
 };
 
 const latestDate = () => { const d = new Date(); d.setDate(d.getDate()-2); return d.toISOString().slice(0,10); };
+const monthBefore = (value:string) => { const d=new Date(`${value}T12:00:00Z`); d.setUTCMonth(d.getUTCMonth()-1); return d.toISOString().slice(0,10); };
+const gibsTileUrl = (value:string) => `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${value}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`;
 const severity = (farm: Farm): Damage => farm.AI_Damage_Percent >= 70 ? 'Severe' : farm.AI_Damage_Percent >= 40 ? 'Moderate' : 'Low';
 const colorFor = (farm: Farm) => farm.Potentially_Missed ? '#9775C9' : severity(farm)==='Severe' ? '#D95C59' : severity(farm)==='Moderate' ? '#D9A441' : '#5EAD78';
 
-function SatelliteMap({ farms, selected, onSelect, date, location, layers, onStatus }: {
+function SatelliteMap({ farms, selected, onSelect, date, beforeDate, compareDates, location, layers, onStatus }: {
   farms: Farm[]; selected: Farm|null; onSelect: (farm: Farm) => void; date: string;
+  beforeDate:string; compareDates:boolean;
   location: Region; layers: Record<string,boolean>;
   onStatus: (status:'loading'|'available'|'unavailable') => void;
 }) {
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Leaflet.Map|null>(null);
   const leafletRef = useRef<typeof import('leaflet')|null>(null);
-  const imageryBaseRef = useRef<Leaflet.TileLayer|null>(null);
-  const satelliteRef = useRef<Leaflet.TileLayer.WMS|null>(null);
   const labelsRef = useRef<Leaflet.TileLayer|null>(null);
   const farmGroupRef = useRef<Leaflet.LayerGroup|null>(null);
   const floodRef = useRef<Leaflet.Polygon|null>(null);
@@ -106,25 +107,15 @@ function SatelliteMap({ farms, selected, onSelect, date, location, layers, onSta
     (async () => {
       if (!elRef.current || mapRef.current) return;
       const L = await import('leaflet');
+      await import('leaflet-side-by-side');
       if (cancelled || !elRef.current) return;
       leafletRef.current = L;
       const map = L.map(elRef.current, {zoomControl:false, attributionControl:true, preferCanvas:false}).setView([location.lat,location.lon], location.zoom);
       L.control.zoom({position:'bottomright'}).addTo(map);
       mapRef.current = map;
-      let errors = 0;
-      const imageryBase = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution:'Esri World Imagery', maxZoom:19,
-      });
-      imageryBase.addTo(map); imageryBaseRef.current = imageryBase;
-      const sat = L.tileLayer.wms('https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi', {
-        layers:'MODIS_Terra_CorrectedReflectance_TrueColor', format:'image/jpeg', transparent:false,
-        attribution:'NASA GIBS / NASA Earthdata', time:date, tileSize:256, maxZoom:19, maxNativeZoom:9, opacity:.28,
-      } as Leaflet.WMSOptions & {time:string});
-      sat.on('loading',()=>onStatus('loading'));
-      sat.on('load',()=>{ errors=0; onStatus('available'); });
-      sat.on('tileerror',()=>{ errors += 1; if(errors>=3) onStatus('unavailable'); });
-      sat.addTo(map); satelliteRef.current = sat;
-      const labels = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {opacity:.18, attribution:'© OpenStreetMap contributors', maxZoom:19});
+      map.createPane('labelsPane');
+      const labelsPane=map.getPane('labelsPane'); if(labelsPane) labelsPane.style.zIndex='350';
+      const labels = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {pane:'labelsPane',opacity:.2, attribution:'© OpenStreetMap contributors', maxZoom:19});
       labels.addTo(map); labelsRef.current = labels;
       const flood = L.polygon(location.floodBoundary, {color:'#4E86B8',fillColor:'#4E86B8',fillOpacity:.2,weight:1.5,interactive:false});
       flood.addTo(map); floodRef.current=flood;
@@ -137,12 +128,30 @@ function SatelliteMap({ farms, selected, onSelect, date, location, layers, onSta
 
   useEffect(() => { if(!mapRef.current) return; mapRef.current.flyTo([location.lat,location.lon],location.zoom,{duration:1}); floodRef.current?.setLatLngs(location.floodBoundary); }, [location]);
   useEffect(() => { const L=leafletRef.current,map=mapRef.current; if(!ready||!L||!map||!selected) return; map.flyToBounds(L.latLngBounds(selected.boundary).pad(.35),{maxZoom:16,duration:.8}); }, [ready,selected?.Farm_ID]);
-  useEffect(() => { onStatus('loading'); satelliteRef.current?.setParams({layers:'MODIS_Terra_CorrectedReflectance_TrueColor',format:'image/jpeg',transparent:false,time:date} as Leaflet.WMSParams & {time:string}, false); satelliteRef.current?.redraw(); }, [date]);
   useEffect(() => {
-    const map=mapRef.current, base=imageryBaseRef.current, sat=satelliteRef.current, labels=labelsRef.current, flood=floodRef.current;
+    const L=leafletRef.current,map=mapRef.current;
+    if(!ready||!L||!map) return;
+    if(!layers.satellite){onStatus('available');return;}
+    onStatus('loading');
+    let errors=0,loaded=0;
+    const expected=selected?1:compareDates?2:1;
+    const monitor=(layer:Leaflet.TileLayer)=>layer.on('load',()=>{loaded+=1;if(loaded>=expected)onStatus('available')}).on('tileerror',()=>{errors+=1;if(errors>=3)onStatus('unavailable')});
+    const current=selected
+      ? monitor(L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{attribution:'Esri World Imagery',maxZoom:19}))
+      : monitor(L.tileLayer(gibsTileUrl(date),{attribution:'NASA GIBS / NASA Earthdata',tileSize:256,maxZoom:19,maxNativeZoom:9}));
+    let previous:Leaflet.TileLayer|null=null;
+    let comparison:Leaflet.Control.SideBySide|null=null;
+    if(!selected&&compareDates){
+      previous=monitor(L.tileLayer(gibsTileUrl(beforeDate),{attribution:'NASA GIBS / NASA Earthdata',tileSize:256,maxZoom:19,maxNativeZoom:9}));
+      previous.addTo(map);current.addTo(map);
+      comparison=L.control.sideBySide(previous,current,{thumbSize:44,padding:4}).addTo(map);
+      elRef.current?.querySelector<HTMLInputElement>('.leaflet-sbs-range')?.setAttribute('aria-label','Satellite comparison divider');
+    }else current.addTo(map);
+    return()=>{comparison?.remove();map.removeLayer(current);if(previous)map.removeLayer(previous)};
+  },[ready,date,beforeDate,compareDates,layers.satellite,selected?.Farm_ID,onStatus]);
+  useEffect(() => {
+    const map=mapRef.current,labels=labelsRef.current,flood=floodRef.current;
     if(!map) return;
-    if(base) layers.satellite ? base.addTo(map) : base.removeFrom(map);
-    if(sat) layers.satellite ? sat.addTo(map) : sat.removeFrom(map);
     if(labels) layers.labels ? labels.addTo(map) : labels.removeFrom(map);
     if(flood) layers.flood ? flood.addTo(map) : flood.removeFrom(map);
   }, [layers]);
@@ -159,7 +168,7 @@ function SatelliteMap({ farms, selected, onSelect, date, location, layers, onSta
       polygon.addTo(group);
     });
   }, [farms, selected?.Farm_ID, layers.farms, ready, onSelect]);
-  return <div ref={elRef} className="leaflet-host" aria-label="Interactive NASA GIBS satellite map with synthetic farm boundaries" />;
+  return <div ref={elRef} className="leaflet-host" aria-label={selected?'Latest high-resolution farm imagery map':compareDates?'Before and after NASA GIBS satellite comparison map':'Date-aware NASA GIBS satellite map with synthetic farm boundaries'} />;
 }
 
 export default function Home() {
@@ -171,6 +180,8 @@ export default function Home() {
   const [selected,setSelected]=useState<Farm|null>(null);
   const [filtersOpen,setFiltersOpen]=useState(false);
   const [date,setDate]=useState(latestDate());
+  const [beforeDate,setBeforeDate]=useState(()=>monthBefore(latestDate()));
+  const [compareDates,setCompareDates]=useState(false);
   const [imageryStatus,setImageryStatus]=useState<'loading'|'available'|'unavailable'>('loading');
   const [regionId,setRegionId]=useState<RegionId>('ballari');
   const [query,setQuery]=useState('Ballari, Karnataka');
@@ -279,13 +290,16 @@ export default function Home() {
             <button className="filter-toggle" onClick={()=>setFiltersOpen(v=>!v)} aria-expanded={filtersOpen}><SlidersHorizontal size={14}/>Filters</button>
             <label className="region-switcher"><MapPin/><span>Region</span><select value={regionId} onChange={e=>selectRegion(e.target.value as RegionId)}><option value="ballari">Ballari, Karnataka</option><option value="sitapur">Sitapur, Uttar Pradesh</option><option value="dhemaji">Dhemaji, Assam</option></select></label>
             <form className="location-search" onSubmit={searchLocation}><div className="searchbox"><Search size={14}/><input aria-label="Search district, village or location" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search district, village or location…"/>{query&&<button className="search-clear" type="button" aria-label="Clear search" onClick={()=>setQuery('')}><X/></button>}</div><button className="search-submit" disabled={searching}>{searching?'Searching…':'Search'}</button></form>
-            <label className="date-control"><CalendarDays size={13}/><input aria-label="Satellite date" type="date" value={date} max={latestDate()} onInput={e=>setDate(e.currentTarget.value)}/></label>
-            <button className="latest" onClick={()=>setDate(latestDate())}><Satellite size={13}/>Latest available</button>
+            <label className="compare-toggle"><input type="checkbox" checked={compareDates} onChange={e=>setCompareDates(e.target.checked)}/><span aria-hidden="true"/>Compare dates</label>
+            {compareDates?<div className="compare-date-controls"><label className="date-control paired"><span>Before</span><input aria-label="Before satellite date" type="date" value={beforeDate} max={date} onInput={e=>setBeforeDate(e.currentTarget.value)}/></label><label className="date-control paired"><span>After</span><input aria-label="After satellite date" type="date" value={date} min={beforeDate} max={latestDate()} onInput={e=>setDate(e.currentTarget.value)}/></label></div>:<label className="date-control"><CalendarDays size={13}/><input aria-label="Satellite date" type="date" value={date} max={latestDate()} onInput={e=>setDate(e.currentTarget.value)}/></label>}
+            <button className="latest" onClick={()=>{const latest=latestDate();setDate(latest);if(compareDates)setBeforeDate(monthBefore(latest))}}><Satellite size={13}/>Latest available</button>
             <span className={`map-status ${imageryStatus}`}><i/>{imageryStatus==='available'?'Satellite available':imageryStatus==='loading'?'Loading imagery':'Imagery unavailable'} <b>{visible.length} farms</b></span>
           </div>
           {locationError&&<div className="location-error"><AlertTriangle size={13}/><span>{locationError}</span><button onClick={()=>setQuery(currentRegion.name)}>Use current region</button></div>}
           <div className="map-stage">
-            <SatelliteMap farms={visible} selected={selected} onSelect={selectFarm} date={date} location={currentRegion} layers={layers} onStatus={setImageryStatus}/>
+            <SatelliteMap farms={visible} selected={selected} onSelect={selectFarm} date={date} beforeDate={beforeDate} compareDates={compareDates} location={currentRegion} layers={layers} onStatus={setImageryStatus}/>
+            {compareDates&&!selected&&<div className="comparison-date-labels" aria-hidden="true"><span><b>Before</b>{beforeDate}</span><span><b>After</b>{date}</span></div>}
+            {selected&&<div className="high-res-label"><Satellite/>Latest available high-res imagery · Esri</div>}
             {imageryStatus==='unavailable'&&<div className="satellite-error"><AlertTriangle/><b>Live satellite imagery temporarily unavailable.</b><small>Farm overlays remain visible. Try a nearby date.</small><button onClick={()=>{setImageryStatus('loading');satelliteRefocusHack(date,setDate)}}><RefreshCw/>Retry</button></div>}
             {filtersOpen&&<aside className="filters">
               <div className="panel-heading"><span>Filters and layers</span><div><button onClick={clearFilters}>Reset</button><button onClick={()=>setFiltersOpen(false)}>Close</button></div></div>
@@ -300,7 +314,7 @@ export default function Home() {
             <div className="legend"><b>Damage evidence</b><span><i className="red"/>Severely affected</span><span><i className="amber"/>Moderately affected</span><span><i className="green"/>No or minor damage</span><span><i className="purple"/>Potentially missed</span><span><i className="blue"/>Flooded area</span></div>
             {selected&&<FarmPanel farm={selected} onClose={()=>setSelected(null)}/>}
           </div>
-          <footer><span><Crosshair size={11}/>{currentRegion.lat.toFixed(4)}, {currentRegion.lon.toFixed(4)}</span><span>Esri World Imagery, NASA Earthdata and OpenStreetMap</span></footer>
+          <footer><span><Crosshair size={11}/>{currentRegion.lat.toFixed(4)}, {currentRegion.lon.toFixed(4)}</span><span>{selected?'Esri World Imagery · latest high-resolution mosaic':'NASA GIBS MODIS Terra True Color'} · OpenStreetMap labels</span></footer>
         </section>
       </section>
     </>}
