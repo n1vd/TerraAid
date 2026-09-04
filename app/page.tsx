@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type * as Leaflet from 'leaflet';
-import { AlertTriangle, BarChart3, Bell, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, ClipboardList, Clock3, Crosshair, Database, FileText, Flag, Info, Layers3, LayoutDashboard, Leaf, Map, MapPin, RefreshCw, Satellite, Search, ShieldCheck, SlidersHorizontal, Sprout, X } from 'lucide-react';
+import { AlertTriangle, BarChart3, Bell, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, ClipboardList, Clock3, Crosshair, Database, FileText, Flag, Info, Layers3, LayoutDashboard, Leaf, LogOut, Mail, Map, MapPin, RefreshCw, Satellite, Search, Settings, ShieldCheck, SlidersHorizontal, Sprout, UserRound, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
@@ -11,10 +11,12 @@ type Farm = {
   Farm_ID: string; Crop: string; Area: number; Flood_Percent: number; NDVI_Change: number;
   AI_Damage_Percent: number; AI_Confidence: number; Claim_Submitted: 'Yes' | 'No';
   Claimed_Damage: number; Potentially_Missed: boolean; Evidence_Mismatch: boolean;
-  Priority: Priority; Alert: string; center: [number, number];
+  Priority: Priority; Alert: string; boundary: [number, number][];
 };
+type RegionId = 'ballari'|'sitapur'|'dhemaji';
+type Region = {id:RegionId; name:string; lat:number; lon:number; zoom:number; updated:string; farms:Farm[]; floodBoundary:[number,number][]};
 
-const rawFarms: Omit<Farm, 'center'>[] = [
+const rawFarms: Omit<Farm, 'boundary'>[] = [
   {Farm_ID:'F001',Crop:'Paddy',Area:2.1,Flood_Percent:24,NDVI_Change:18,AI_Damage_Percent:28,AI_Confidence:88,Claim_Submitted:'Yes',Claimed_Damage:25,Potentially_Missed:false,Evidence_Mismatch:false,Priority:'LOW',Alert:'Monitor'},
   {Farm_ID:'F002',Crop:'Groundnut',Area:1.7,Flood_Percent:46,NDVI_Change:35,AI_Damage_Percent:49,AI_Confidence:84,Claim_Submitted:'Yes',Claimed_Damage:52,Potentially_Missed:false,Evidence_Mismatch:false,Priority:'MEDIUM',Alert:'Review'},
   {Farm_ID:'F003',Crop:'Paddy',Area:3.2,Flood_Percent:86,NDVI_Change:69,AI_Damage_Percent:81,AI_Confidence:93,Claim_Submitted:'No',Claimed_Damage:0,Potentially_Missed:true,Evidence_Mismatch:false,Priority:'HIGH',Alert:'Potentially missed'},
@@ -43,7 +45,39 @@ const centers: [number, number][] = [
   [15.137,76.925],[15.136,76.941],[15.127,76.900],[15.126,76.914],[15.125,76.929],
   [15.124,76.944],[15.115,76.905],[15.114,76.920],[15.113,76.935],[15.112,76.950],
 ];
-const FARMS: Farm[] = rawFarms.map((farm, index) => ({...farm, center: centers[index]}));
+const farmBoundary=(center:[number,number],index:number,pattern:'blocks'|'riverside'|'clusters'):[number,number][]=>{
+  const [lat,lon]=center;
+  if(pattern==='riverside'){
+    const width=.0015+(index%3)*.00035, length=.0064+(index%4)*.0007, slant=(index%2?.0012:-.001);
+    return [[lat-width,lon-length],[lat+width*.82,lon-length+slant],[lat+width,lon+length],[lat-width*.72,lon+length-slant]];
+  }
+  if(pattern==='clusters'){
+    const sx=.0028+(index%4)*.00075, sy=.0035+(index%3)*.001;
+    return [[lat-sx*.9,lon-sy*.45],[lat-sx*.2,lon-sy],[lat+sx*.86,lon-sy*.56],[lat+sx,lon+sy*.48],[lat+sx*.05,lon+sy],[lat-sx,lon+sy*.42]];
+  }
+  const sx=.0046+(index%3)*.0005, sy=.0055+(index%2)*.0006;
+  return [[lat-sx,lon-sy],[lat+sx*.78,lon-sy*.84],[lat+sx,lon+sy*.82],[lat-sx*.72,lon+sy]];
+};
+
+const buildRegionFarms=(prefix:'S'|'D',regionCenters:[number,number][],pattern:'riverside'|'clusters',offset:number):Farm[]=>regionCenters.map((center,index)=>{
+  const source=rawFarms[(index*3+offset)%rawFarms.length];
+  const missed=(prefix==='S'?[3,12,16]:[2,9,14]).includes(index+1);
+  const mismatch=(prefix==='S'?[6,10,15]:[5,8,13]).includes(index+1);
+  const baseDamage=Math.max(16,Math.min(88,source.AI_Damage_Percent+(prefix==='S'?4:-2)+((index%3)-1)*3));
+  const aiDamage=missed?Math.max(72,baseDamage):baseDamage;
+  const claimed=mismatch?Math.max(18,Math.min(86,aiDamage+(index%2?27:-25))):Math.max(12,Math.min(84,aiDamage+(index%3)-1));
+  const claimSubmitted:Farm['Claim_Submitted']=missed||index%7===5?'No':'Yes';
+  return {...source,Farm_ID:`${prefix}${String(index+1).padStart(3,'0')}`,Crop:['Paddy','Cotton','Maize','Groundnut','Millet'][(index+offset)%5],Area:Number((1.3+(index%7)*.38).toFixed(1)),Flood_Percent:Math.max(12,Math.min(93,aiDamage+7-(index%4)*3)),NDVI_Change:Math.max(9,aiDamage-16+(index%5)),AI_Damage_Percent:aiDamage,AI_Confidence:81+(index%13),Claim_Submitted:claimSubmitted,Claimed_Damage:claimSubmitted==='Yes'?claimed:0,Potentially_Missed:missed,Evidence_Mismatch:mismatch,Priority:missed||aiDamage>=74?'HIGH':aiDamage>=43?'MEDIUM':'LOW',Alert:missed?'Potentially missed':mismatch?'Evidence mismatch':aiDamage>=70?'Verify':aiDamage>=40?'Review':'Monitor',boundary:farmBoundary(center,index,pattern)};
+});
+
+const SITAPUR_CENTERS:[number,number][]=[[27.568,80.692],[27.574,80.707],[27.579,80.721],[27.585,80.736],[27.590,80.751],[27.596,80.767],[27.602,80.782],[27.608,80.798],[27.615,80.806],[27.621,80.790],[27.627,80.773],[27.633,80.757],[27.640,80.741],[27.646,80.724],[27.652,80.708],[27.658,80.692]];
+const DHEMAJI_CENTERS:[number,number][]=[[27.445,94.512],[27.454,94.548],[27.448,94.588],[27.463,94.628],[27.479,94.525],[27.486,94.566],[27.479,94.611],[27.504,94.641],[27.516,94.514],[27.524,94.553],[27.519,94.598],[27.541,94.624],[27.555,94.530],[27.564,94.576]];
+const BALLARI_FARMS:Farm[]=rawFarms.map((farm,index)=>({...farm,boundary:farmBoundary(centers[index],index,'blocks')}));
+const REGIONS:Record<RegionId,Region>={
+  ballari:{id:'ballari',name:'Ballari, Karnataka',lat:15.1394,lon:76.9214,zoom:14,updated:'09/02/2026 • 10:30 AM IST',farms:BALLARI_FARMS,floodBoundary:[[15.168,76.892],[15.164,76.953],[15.148,76.958],[15.137,76.946],[15.122,76.959],[15.104,76.943],[15.109,76.897],[15.130,76.889]]},
+  sitapur:{id:'sitapur',name:'Sitapur, Uttar Pradesh',lat:27.613,lon:80.751,zoom:13,updated:'09/02/2026 • 10:18 AM IST',farms:buildRegionFarms('S',SITAPUR_CENTERS,'riverside',2),floodBoundary:[[27.557,80.679],[27.570,80.708],[27.592,80.748],[27.616,80.817],[27.635,80.793],[27.610,80.735],[27.580,80.686]]},
+  dhemaji:{id:'dhemaji',name:'Dhemaji, Assam',lat:27.505,lon:94.575,zoom:13,updated:'09/02/2026 • 09:54 AM IST',farms:buildRegionFarms('D',DHEMAJI_CENTERS,'clusters',5),floodBoundary:[[27.430,94.495],[27.447,94.641],[27.492,94.660],[27.535,94.646],[27.577,94.602],[27.571,94.516],[27.519,94.492],[27.463,94.487]]},
+};
 
 const latestDate = () => { const d = new Date(); d.setDate(d.getDate()-2); return d.toISOString().slice(0,10); };
 const severity = (farm: Farm): Damage => farm.AI_Damage_Percent >= 70 ? 'Severe' : farm.AI_Damage_Percent >= 40 ? 'Moderate' : 'Low';
@@ -51,7 +85,7 @@ const colorFor = (farm: Farm) => farm.Potentially_Missed ? '#9775C9' : severity(
 
 function SatelliteMap({ farms, selected, onSelect, date, location, layers, onStatus }: {
   farms: Farm[]; selected: Farm|null; onSelect: (farm: Farm) => void; date: string;
-  location: {lat:number; lon:number; name:string}; layers: Record<string,boolean>;
+  location: Region; layers: Record<string,boolean>;
   onStatus: (status:'loading'|'available'|'unavailable') => void;
 }) {
   const elRef = useRef<HTMLDivElement>(null);
@@ -71,7 +105,7 @@ function SatelliteMap({ farms, selected, onSelect, date, location, layers, onSta
       const L = await import('leaflet');
       if (cancelled || !elRef.current) return;
       leafletRef.current = L;
-      const map = L.map(elRef.current, {zoomControl:false, attributionControl:true, preferCanvas:false}).setView([location.lat,location.lon], 14);
+      const map = L.map(elRef.current, {zoomControl:false, attributionControl:true, preferCanvas:false}).setView([location.lat,location.lon], location.zoom);
       L.control.zoom({position:'bottomright'}).addTo(map);
       mapRef.current = map;
       let errors = 0;
@@ -89,7 +123,7 @@ function SatelliteMap({ farms, selected, onSelect, date, location, layers, onSta
       sat.addTo(map); satelliteRef.current = sat;
       const labels = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {opacity:.18, attribution:'© OpenStreetMap contributors', maxZoom:19});
       labels.addTo(map); labelsRef.current = labels;
-      const flood = L.polygon([[15.168,76.892],[15.164,76.953],[15.148,76.958],[15.137,76.946],[15.122,76.959],[15.104,76.943],[15.109,76.897],[15.130,76.889]], {color:'#4E86B8',fillColor:'#4E86B8',fillOpacity:.2,weight:1.5,interactive:false});
+      const flood = L.polygon(location.floodBoundary, {color:'#4E86B8',fillColor:'#4E86B8',fillOpacity:.2,weight:1.5,interactive:false});
       flood.addTo(map); floodRef.current=flood;
       farmGroupRef.current = L.layerGroup().addTo(map);
       setReady(true);
@@ -98,7 +132,8 @@ function SatelliteMap({ farms, selected, onSelect, date, location, layers, onSta
     return () => { cancelled=true; mapRef.current?.remove(); mapRef.current=null; };
   }, []);
 
-  useEffect(() => { if(!mapRef.current) return; mapRef.current.flyTo([location.lat,location.lon],14,{duration:1}); }, [location]);
+  useEffect(() => { if(!mapRef.current) return; mapRef.current.flyTo([location.lat,location.lon],location.zoom,{duration:1}); floodRef.current?.setLatLngs(location.floodBoundary); }, [location]);
+  useEffect(() => { const L=leafletRef.current,map=mapRef.current; if(!ready||!L||!map||!selected) return; map.flyToBounds(L.latLngBounds(selected.boundary).pad(.35),{maxZoom:16,duration:.8}); }, [ready,selected?.Farm_ID]);
   useEffect(() => { onStatus('loading'); satelliteRef.current?.setParams({layers:'MODIS_Terra_CorrectedReflectance_TrueColor',format:'image/jpeg',transparent:false,time:date} as Leaflet.WMSParams & {time:string}, false); satelliteRef.current?.redraw(); }, [date]);
   useEffect(() => {
     const map=mapRef.current, base=imageryBaseRef.current, sat=satelliteRef.current, labels=labelsRef.current, flood=floodRef.current;
@@ -113,11 +148,9 @@ function SatelliteMap({ farms, selected, onSelect, date, location, layers, onSta
     if(!ready || !L || !group) return;
     group.clearLayers();
     if(!layers.farms) return;
-    farms.forEach((farm,index) => {
-      const [lat,lon]=farm.center, sx=.0046+(index%3)*.0005, sy=.0055+(index%2)*.0006;
-      const points: Leaflet.LatLngExpression[] = [[lat-sx,lon-sy],[lat+sx*.78,lon-sy*.84],[lat+sx,lon+sy*.82],[lat-sx*.72,lon+sy]];
+    farms.forEach((farm) => {
       const active=farm.Farm_ID===selected?.Farm_ID;
-      const polygon=L.polygon(points,{color:active?'#ffffff':colorFor(farm),fillColor:colorFor(farm),fillOpacity:farm.Potentially_Missed?.38:.34,weight:active?2.5:1.7});
+      const polygon=L.polygon(farm.boundary,{color:active?'#ffffff':colorFor(farm),fillColor:colorFor(farm),fillOpacity:farm.Potentially_Missed?.38:.34,weight:active?2.5:1.7});
       polygon.bindTooltip(`<b>${farm.Farm_ID}</b><br>${severity(farm)} damage, ${farm.AI_Damage_Percent}% assessed`,{direction:'top',offset:[0,-4]});
       polygon.on('click',()=>onSelect(farm));
       polygon.addTo(group);
@@ -136,31 +169,44 @@ export default function Home() {
   const [filtersOpen,setFiltersOpen]=useState(false);
   const [date,setDate]=useState(latestDate());
   const [imageryStatus,setImageryStatus]=useState<'loading'|'available'|'unavailable'>('loading');
-  const [location,setLocation]=useState({lat:15.1394,lon:76.9214,name:'Ballari, Karnataka'});
+  const [regionId,setRegionId]=useState<RegionId>('ballari');
   const [query,setQuery]=useState('Ballari, Karnataka');
   const [searching,setSearching]=useState(false);
   const [locationError,setLocationError]=useState('');
   const [claimSearch,setClaimSearch]=useState('');
   const [layers,setLayers]=useState({satellite:true,farms:true,flood:true,labels:true});
+  const [accountPanel,setAccountPanel]=useState<'profile'|'settings'|null>(null);
+  const [accountMenuOpen,setAccountMenuOpen]=useState(false);
+  const [signedIn,setSignedIn]=useState(true);
+  const [emailAlerts,setEmailAlerts]=useState(true);
+  const [autoRefresh,setAutoRefresh]=useState(true);
+  const currentRegion=REGIONS[regionId];
+  const farms=currentRegion.farms;
 
-  const visible=useMemo(()=>FARMS.filter(f =>
+  const visible=useMemo(()=>farms.filter(f =>
     (quick==='all'||(quick==='missed'&&f.Potentially_Missed)||(quick==='mismatch'&&f.Evidence_Mismatch)) &&
     (priority==='All'||f.Priority===priority) && (claim==='All'||f.Claim_Submitted===claim) &&
     (damage==='All'||severity(f)===damage)
-  ),[quick,priority,claim,damage]);
+  ),[farms,quick,priority,claim,damage]);
   const counts=useMemo(()=>({all:visible.length,severe:visible.filter(f=>severity(f)==='Severe').length,claims:visible.filter(f=>f.Claim_Submitted==='Yes').length,missed:visible.filter(f=>f.Potentially_Missed).length,high:visible.filter(f=>f.Priority==='HIGH').length,mismatch:visible.filter(f=>f.Evidence_Mismatch).length}),[visible]);
 
-  const searchLocation=async(e:FormEvent) => {
-    e.preventDefault(); if(!query.trim()) return; setSearching(true); setLocationError('');
-    try { const response=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`,{headers:{'Accept-Language':'en'}}); if(!response.ok) throw new Error(); const data=await response.json() as {lat:string;lon:string;display_name:string}[]; if(!data[0]) throw new Error(); setLocation({lat:Number(data[0].lat),lon:Number(data[0].lon),name:data[0].display_name.split(',').slice(0,2).join(',')}); }
-    catch { setLocationError('Location not found. Try a district, village, or coordinates.'); }
-    finally { setSearching(false); }
+  const scrollToTop=()=>requestAnimationFrame(()=>window.scrollTo({top:0,left:0,behavior:'auto'}));
+  const showView=(next:typeof view)=>{setView(next);scrollToTop();};
+  const selectRegion=(next:RegionId)=>{
+    const region=REGIONS[next]; setRegionId(next); setQuery(region.name); setSelected(null); setLocationError('');
+    setQuick('all'); setPriority('All'); setClaim('All'); setDamage('All'); setClaimSearch(''); if(autoRefresh)setImageryStatus('loading'); scrollToTop();
   };
-  const useCoords=() => { const match=query.split(',').map(Number); if(match.length===2&&match.every(Number.isFinite)){setLocation({lat:match[0],lon:match[1],name:`${match[0].toFixed(4)}, ${match[1].toFixed(4)}`});setLocationError('');} else setLocationError('Enter coordinates as latitude, longitude.'); };
+  const searchLocation=(e:FormEvent) => {
+    e.preventDefault(); if(!query.trim()) return; setSearching(true); setLocationError('');
+    const normalized=query.toLowerCase(); const match=Object.values(REGIONS).find(region=>region.name.toLowerCase().includes(normalized)||normalized.includes(region.name.split(',')[0].toLowerCase()));
+    if(match) selectRegion(match.id); else setLocationError('Demo regions available: Ballari, Sitapur, and Dhemaji.');
+    setSearching(false);
+  };
   const selectQuick=(next:'all'|'missed'|'mismatch') => setQuick(next);
   const clearFilters=()=>{setQuick('all');setPriority('All');setClaim('All');setDamage('All');};
   const selectFarm=(farm:Farm)=>setSelected(farm);
-  const filteredClaims=FARMS.filter(f=>f.Farm_ID.toLowerCase().includes(claimSearch.toLowerCase()));
+  const openFarmOnMap=(farm:Farm)=>{setSelected(farm);setFiltersOpen(false);showView('overview');};
+  const filteredClaims=farms.filter(f=>f.Farm_ID.toLowerCase().includes(claimSearch.toLowerCase()));
   const nav=[
     {id:'overview' as const,label:'Overview',icon:<LayoutDashboard/>},
     {id:'claims' as const,label:'Claims',icon:<FileText/>},
@@ -174,61 +220,75 @@ export default function Home() {
     {label:'Potentially missed',value:counts.missed,icon:<Search/>},
     {label:'High priority',value:counts.high,icon:<Flag/>},
   ];
-  const severeAll=FARMS.filter(f=>severity(f)==='Severe');
+  const severeAll=farms.filter(f=>severity(f)==='Severe');
   const severeClaimed=severeAll.filter(f=>f.Claim_Submitted==='Yes').length;
-  const severityCounts={severe:FARMS.filter(f=>severity(f)==='Severe').length,moderate:FARMS.filter(f=>severity(f)==='Moderate').length,low:FARMS.filter(f=>severity(f)==='Low').length};
+  const severityCounts={severe:farms.filter(f=>severity(f)==='Severe').length,moderate:farms.filter(f=>severity(f)==='Moderate').length,low:farms.filter(f=>severity(f)==='Low').length};
 
   const currentTitle=view==='overview'?'Flood Impact Overview':view==='claims'?'Claims Review':view==='analytics'?'Damage Analytics':'Verification Alerts';
+  const alertCount=farms.filter(f=>f.Potentially_Missed).length;
+
+  useEffect(()=>{const close=(event:KeyboardEvent)=>{if(event.key==='Escape')setAccountMenuOpen(false)};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close)},[]);
+
+  if(!signedIn) return <main className="signed-out-page"><section className="signed-out-card"><span className="brand-mark"><Leaf size={22}/></span><span className="eyebrow">TerraAid secure workspace</span><h1>You’re signed out</h1><p>Your prototype session has ended safely. Sign back in to continue reviewing regional flood evidence.</p><button onClick={()=>setSignedIn(true)}>Sign back in as AD</button></section></main>;
 
   return <main className="shell">
     <header className="app-topbar">
       <div className="topbar-brand-zone">
-        <button className="brand" onClick={()=>setView('overview')}><span className="brand-mark"><Leaf size={19}/></span><strong>TerraAid</strong></button>
+        <button className="brand" onClick={()=>showView('overview')}><span className="brand-mark"><Leaf size={19}/></span><strong>TerraAid</strong></button>
       </div>
       <div className="topbar-main">
         <span className="live-pill"><i/>Live</span>
-        <div className="breadcrumb"><span>{location.name}</span><ChevronRight/><strong>{currentTitle}</strong></div>
+        <div className="breadcrumb"><span>{currentRegion.name}</span><ChevronRight/><strong>{currentTitle}</strong></div>
         <div className="topbar-actions">
-          <button className="notification" aria-label="3 notifications"><Bell/><em>3</em></button>
-          <button className="user-menu" aria-label="Open user menu"><span>AD</span><ChevronDown/></button>
+          <button className="notification" aria-label={`${alertCount} priority notifications`} onClick={()=>showView('alerts')}><Bell/><em>{alertCount}</em></button>
+          <div className="account-control" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node))setAccountMenuOpen(false)}}>
+            <button className="user-menu" aria-label="Open account menu" aria-expanded={accountMenuOpen} onClick={()=>setAccountMenuOpen(open=>!open)}><span>AD</span><ChevronDown/></button>
+            {accountMenuOpen&&<div className="account-menu" role="menu">
+              <div className="account-menu-label"><strong>Admin Officer</strong><small>District relief authority</small></div><hr/>
+              <button role="menuitem" onClick={()=>{setAccountPanel('profile');setAccountMenuOpen(false)}}><UserRound/>Profile</button>
+              <button role="menuitem" onClick={()=>{setAccountPanel('settings');setAccountMenuOpen(false)}}><Settings/>Settings</button><hr/>
+              <button className="danger" role="menuitem" onClick={()=>{setAccountPanel(null);setAccountMenuOpen(false);setSignedIn(false)}}><LogOut/>Log out</button>
+            </div>}
+          </div>
         </div>
       </div>
     </header>
     <aside className="nav-sidebar">
-      <nav aria-label="Primary navigation">{nav.map(item=><button key={item.id} className={view===item.id?'active':''} onClick={()=>setView(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav>
+      <nav aria-label="Primary navigation">{nav.map(item=><button key={item.id} className={view===item.id?'active':''} onClick={()=>showView(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav>
       <aside className="sidebar-note"><Leaf/><p>TerraAid is built to support evidence-based decisions and faster recovery.</p></aside>
     </aside>
     <div className="page-content">
     <section className="intro">
-      <div><h1>{currentTitle}</h1><div className="header-meta"><strong>{location.name}</strong><span className="verified"><CheckCircle2/></span><span className="assessment-tag">Post-flood agricultural assessment</span></div><p className="intro-description">Monitor flood impact on agricultural farms, track affected areas, and manage claims.</p></div>
+      <div><h1>{currentTitle}</h1><div className="header-meta"><strong>{currentRegion.name}</strong><span className="verified"><CheckCircle2/></span><span className="assessment-tag">Post-flood agricultural assessment</span></div><p className="intro-description">Monitor flood impact on agricultural farms, track affected areas, and manage claims.</p></div>
       <Dialog><DialogTrigger className="method"><Info size={14}/> Data &amp; method</DialogTrigger><DialogContent className="method-dialog"><DialogHeader><DialogTitle>Data &amp; method</DialogTitle><DialogDescription>TerraAid supports authorised human decisions; it does not approve or reject claims.</DialogDescription></DialogHeader><div className="method-list"><div><Satellite/><span><b>Satellite imagery</b><small>NASA GIBS MODIS Terra True Color. Historical date requests are sent to the live WMS service.</small></span></div><div><BarChart3/><span><b>Damage analysis</b><small>May combine flood evidence, vegetation change and automated change detection.</small></span></div><div><Database/><span><b>Prototype records</b><small>Claims and farm boundaries are synthetic demonstration data—not official cadastral parcels.</small></span></div><div><ShieldCheck/><span><b>Human authority</b><small>Field verification and final relief decisions remain with authorised officials.</small></span></div></div></DialogContent></Dialog>
     </section>
     {view==='overview' && <>
       <section className="metric-grid">{metrics.map(metric=><article className="metric" key={metric.label}><span className="metric-icon">{metric.icon}</span><div><strong>{metric.value}</strong><span>{metric.label}</span></div></article>)}</section>
       <section className="info-strip" aria-label="Assessment summary">
-        <article><Clock3/><div><strong>Severe impact detected</strong><span>7 farms need immediate attention</span></div></article>
-        <article><Map/><div><strong>Coverage</strong><span>20 farms • Ballari, Karnataka</span></div></article>
+        <article><Clock3/><div><strong>Severe impact detected</strong><span>{counts.severe} farms need immediate attention</span></div></article>
+        <article><Map/><div><strong>Coverage</strong><span>{farms.length} farms • {currentRegion.name}</span></div></article>
         <article><Database/><div><strong>Data source</strong><span>Satellite imagery &amp; field data</span></div></article>
-        <article><CalendarDays/><div><strong>Last updated</strong><span>09/02/2026 • 10:30 AM IST</span></div></article>
+        <article><CalendarDays/><div><strong>Last updated</strong><span>{currentRegion.updated}</span></div></article>
       </section>
       <section className="workspace">
         <section className="map-card">
           <div className="map-toolbar">
             <button className="filter-toggle" onClick={()=>setFiltersOpen(v=>!v)} aria-expanded={filtersOpen}><SlidersHorizontal size={14}/>Filters</button>
+            <label className="region-switcher"><MapPin/><span>Region</span><select value={regionId} onChange={e=>selectRegion(e.target.value as RegionId)}><option value="ballari">Ballari, Karnataka</option><option value="sitapur">Sitapur, Uttar Pradesh</option><option value="dhemaji">Dhemaji, Assam</option></select></label>
             <form className="location-search" onSubmit={searchLocation}><div className="searchbox"><Search size={14}/><input aria-label="Search district, village or location" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search district, village or location…"/>{query&&<button className="search-clear" type="button" aria-label="Clear search" onClick={()=>setQuery('')}><X/></button>}</div><button className="search-submit" disabled={searching}>{searching?'Searching…':'Search'}</button></form>
             <label className="date-control"><CalendarDays size={13}/><input aria-label="Satellite date" type="date" value={date} max={latestDate()} onInput={e=>setDate(e.currentTarget.value)}/></label>
             <button className="latest" onClick={()=>setDate(latestDate())}><Satellite size={13}/>Latest available</button>
             <span className={`map-status ${imageryStatus}`}><i/>{imageryStatus==='available'?'Satellite available':imageryStatus==='loading'?'Loading imagery':'Imagery unavailable'} <b>{visible.length} farms</b></span>
           </div>
-          {locationError&&<div className="location-error"><AlertTriangle size={13}/><span>{locationError}</span><button onClick={useCoords}>Use coordinates</button></div>}
+          {locationError&&<div className="location-error"><AlertTriangle size={13}/><span>{locationError}</span><button onClick={()=>setQuery(currentRegion.name)}>Use current region</button></div>}
           <div className="map-stage">
-            <SatelliteMap farms={visible} selected={selected} onSelect={selectFarm} date={date} location={location} layers={layers} onStatus={setImageryStatus}/>
+            <SatelliteMap farms={visible} selected={selected} onSelect={selectFarm} date={date} location={currentRegion} layers={layers} onStatus={setImageryStatus}/>
             {imageryStatus==='unavailable'&&<div className="satellite-error"><AlertTriangle/><b>Live satellite imagery temporarily unavailable.</b><small>Farm overlays remain visible. Try a nearby date.</small><button onClick={()=>{setImageryStatus('loading');satelliteRefocusHack(date,setDate)}}><RefreshCw/>Retry</button></div>}
             {filtersOpen&&<aside className="filters">
               <div className="panel-heading"><span>Filters and layers</span><div><button onClick={clearFilters}>Reset</button><button onClick={()=>setFiltersOpen(false)}>Close</button></div></div>
-              <button className={quick==='missed'?'filter-active':''} onClick={()=>selectQuick('missed')}><b>Potentially missed</b><small>Severe damage and no claim</small><em>{FARMS.filter(f=>f.Potentially_Missed).length}</em></button>
-              <button className={quick==='all'?'filter-active all-filter':''} onClick={()=>selectQuick('all')}><b>All assessed farms</b><small>Complete assessment</small><em>{FARMS.length}</em></button>
-              <button className={quick==='mismatch'?'filter-active':''} onClick={()=>selectQuick('mismatch')}><b>Evidence mismatch</b><small>Closer review advised</small><em>{FARMS.filter(f=>f.Evidence_Mismatch).length}</em></button>
+              <button className={quick==='missed'?'filter-active':''} onClick={()=>selectQuick('missed')}><b>Potentially missed</b><small>Severe damage and no claim</small><em>{farms.filter(f=>f.Potentially_Missed).length}</em></button>
+              <button className={quick==='all'?'filter-active all-filter':''} onClick={()=>selectQuick('all')}><b>All assessed farms</b><small>Complete assessment</small><em>{farms.length}</em></button>
+              <button className={quick==='mismatch'?'filter-active':''} onClick={()=>selectQuick('mismatch')}><b>Evidence mismatch</b><small>Closer review advised</small><em>{farms.filter(f=>f.Evidence_Mismatch).length}</em></button>
               <div className="filter-group"><label>Priority</label><select value={priority} onChange={e=>setPriority(e.target.value as typeof priority)}><option>All</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select></div>
               <div className="filter-group"><label>Claim status</label><select value={claim} onChange={e=>setClaim(e.target.value as typeof claim)}><option value="All">All</option><option value="Yes">Submitted</option><option value="No">No claim</option></select></div>
               <div className="filter-group"><label>Damage evidence</label><select value={damage} onChange={e=>setDamage(e.target.value as typeof damage)}><option>All</option><option>Severe</option><option>Moderate</option><option>Low</option></select></div>
@@ -237,14 +297,20 @@ export default function Home() {
             <div className="legend"><b>Damage evidence</b><span><i className="red"/>Severely affected</span><span><i className="amber"/>Moderately affected</span><span><i className="green"/>No or minor damage</span><span><i className="purple"/>Potentially missed</span><span><i className="blue"/>Flooded area</span></div>
             {selected&&<FarmPanel farm={selected} onClose={()=>setSelected(null)}/>}
           </div>
-          <footer><span><Crosshair size={11}/>{location.lat.toFixed(4)}, {location.lon.toFixed(4)}</span><span>Esri World Imagery, NASA Earthdata and OpenStreetMap</span></footer>
+          <footer><span><Crosshair size={11}/>{currentRegion.lat.toFixed(4)}, {currentRegion.lon.toFixed(4)}</span><span>Esri World Imagery, NASA Earthdata and OpenStreetMap</span></footer>
         </section>
       </section>
     </>}
-    {view==='claims'&&<ClaimsView farms={filteredClaims} search={claimSearch} onSearch={setClaimSearch} onOpen={farm=>{setSelected(farm);setView('overview');}}/>}
-    {view==='analytics'&&<AnalyticsView severityCounts={severityCounts} severeClaimed={severeClaimed} severeTotal={severeAll.length}/>} 
-    {view==='alerts'&&<AlertsView farms={FARMS.filter(f=>f.Potentially_Missed||f.Evidence_Mismatch||f.Priority==='HIGH')} onOpen={farm=>{setSelected(farm);setView('overview');}}/>}
+    {view==='claims'&&<ClaimsView farms={filteredClaims} search={claimSearch} onSearch={setClaimSearch} onOpen={openFarmOnMap}/>}
+    {view==='analytics'&&<AnalyticsView severityCounts={severityCounts} severeClaimed={severeClaimed} severeTotal={severeAll.length} missed={farms.filter(f=>f.Potentially_Missed).length}/>}
+    {view==='alerts'&&<AlertsView farms={farms.filter(f=>f.Potentially_Missed||f.Evidence_Mismatch||f.Priority==='HIGH')} onOpen={openFarmOnMap}/>}
     </div>
+    <Dialog open={accountPanel!==null} onOpenChange={open=>{if(!open)setAccountPanel(null)}}>
+      <DialogContent className="account-dialog">
+        <DialogHeader><DialogTitle>{accountPanel==='profile'?'Account profile':'Dashboard settings'}</DialogTitle><DialogDescription>{accountPanel==='profile'?'Signed-in relief authority details.':'Choose how TerraAid keeps you informed during reviews.'}</DialogDescription></DialogHeader>
+        {accountPanel==='profile'?<div className="profile-card"><span>AD</span><div><strong>Admin Officer</strong><small><Mail/> admin@terraaid.in</small><small><ShieldCheck/> District relief authority</small></div></div>:<div className="settings-list"><label><span><strong>Email priority alerts</strong><small>Receive potentially missed beneficiary notifications.</small></span><input type="checkbox" checked={emailAlerts} onChange={e=>setEmailAlerts(e.target.checked)}/></label><label><span><strong>Automatic map refresh</strong><small>Refresh imagery status when the region changes.</small></span><input type="checkbox" checked={autoRefresh} onChange={e=>setAutoRefresh(e.target.checked)}/></label></div>}
+      </DialogContent>
+    </Dialog>
   </main>;
 }
 
@@ -261,6 +327,6 @@ function FarmPanel({farm,onClose}:{farm:Farm;onClose:()=>void}) { return <aside 
 
 function ClaimsView({farms,search,onSearch,onOpen}:{farms:Farm[];search:string;onSearch:(v:string)=>void;onOpen:(f:Farm)=>void}) { return <section className="page-panel"><div className="section-head"><div><span className="eyebrow">Claim and evidence review</span><h2>Claims register</h2><p>Synthetic claim records compared with prototype satellite analysis.</p></div><div className="table-search"><Search/><input value={search} onChange={e=>onSearch(e.target.value)} placeholder="Search Farm ID…"/></div></div><div className="table-wrap"><table><thead><tr><th>Farm ID</th><th>Crop</th><th>Claim</th><th>Claimed damage</th><th>AI damage</th><th>Mismatch</th><th>Priority</th><th/></tr></thead><tbody>{farms.map(f=><tr key={f.Farm_ID}><td><b>{f.Farm_ID}</b></td><td>{f.Crop}</td><td><span className={`table-status ${f.Claim_Submitted==='No'?'no':''}`}>{f.Claim_Submitted==='Yes'?'Submitted':'No claim'}</span></td><td>{f.Claim_Submitted==='Yes'?`${f.Claimed_Damage}%`:'—'}</td><td>{f.AI_Damage_Percent}%</td><td>{f.Evidence_Mismatch?<span className="mismatch-chip">Review</span>:'Aligned'}</td><td><span className={`priority-chip priority-${f.Priority.toLowerCase()}`}>{f.Priority.toLowerCase()}</span></td><td><button onClick={()=>onOpen(f)}>View on map</button></td></tr>)}</tbody></table></div><div className="legal-note"><ShieldCheck/>Satellite evidence is decision support, not legal or automatic claim determination.</div></section>; }
 
-function AnalyticsView({severityCounts,severeClaimed,severeTotal}:{severityCounts:{severe:number;moderate:number;low:number};severeClaimed:number;severeTotal:number}) { const total=severityCounts.severe+severityCounts.moderate+severityCounts.low; const missed=FARMS.filter(f=>f.Potentially_Missed).length; return <section className="page-panel analytics"><div className="section-head"><div><span className="eyebrow">District evidence summary</span><h2>Damage intelligence</h2><p>Decision-relevant indicators from the current synthetic assessment.</p></div></div><div className="analytics-grid"><article className="chart-card"><div><span>Damage severity</span><strong>{total} farms</strong></div><div className="donut" style={{background:`conic-gradient(#D95C59 0 ${severityCounts.severe/total*100}%,#D9A441 0 ${(severityCounts.severe+severityCounts.moderate)/total*100}%,#5EAD78 0)`}}><span>{severityCounts.severe}<small>severe</small></span></div><ul><li><i className="red"/>Severe <b>{severityCounts.severe}</b></li><li><i className="amber"/>Moderate <b>{severityCounts.moderate}</b></li><li><i className="green"/>Low / minor <b>{severityCounts.low}</b></li></ul></article><article className="chart-card bars-card"><div><span>Claims among severe farms</span><strong>{severeTotal} severe cases</strong></div><div className="bar-item"><label><span>Claim submitted</span><b>{severeClaimed}</b></label><i><em style={{width:`${severeClaimed/severeTotal*100}%`}}/></i></div><div className="bar-item no-claim-bar"><label><span>No claim</span><b>{severeTotal-severeClaimed}</b></label><i><em style={{width:`${(severeTotal-severeClaimed)/severeTotal*100}%`}}/></i></div><small>Every unclaimed severe case is queued for human review.</small></article><article className="chart-card focus-card"><span className="eyebrow purple-text">Coverage gap</span><strong>{missed}</strong><h3>Potentially missed beneficiaries</h3><p>Severe damage evidence with no corresponding claim.</p><div><AlertTriangle/>Field verification recommended</div></article></div></section>; }
+function AnalyticsView({severityCounts,severeClaimed,severeTotal,missed}:{severityCounts:{severe:number;moderate:number;low:number};severeClaimed:number;severeTotal:number;missed:number}) { const total=severityCounts.severe+severityCounts.moderate+severityCounts.low; return <section className="page-panel analytics"><div className="section-head"><div><span className="eyebrow">District evidence summary</span><h2>Damage intelligence</h2><p>Decision-relevant indicators from the current synthetic assessment.</p></div></div><div className="analytics-grid"><article className="chart-card"><div><span>Damage severity</span><strong>{total} farms</strong></div><div className="donut" style={{background:`conic-gradient(#D95C59 0 ${severityCounts.severe/total*100}%,#D9A441 0 ${(severityCounts.severe+severityCounts.moderate)/total*100}%,#5EAD78 0)`}}><span>{severityCounts.severe}<small>severe</small></span></div><ul><li><i className="red"/>Severe <b>{severityCounts.severe}</b></li><li><i className="amber"/>Moderate <b>{severityCounts.moderate}</b></li><li><i className="green"/>Low / minor <b>{severityCounts.low}</b></li></ul></article><article className="chart-card bars-card"><div><span>Claims among severe farms</span><strong>{severeTotal} severe cases</strong></div><div className="bar-item"><label><span>Claim submitted</span><b>{severeClaimed}</b></label><i><em style={{width:`${severeClaimed/severeTotal*100}%`}}/></i></div><div className="bar-item no-claim-bar"><label><span>No claim</span><b>{severeTotal-severeClaimed}</b></label><i><em style={{width:`${(severeTotal-severeClaimed)/severeTotal*100}%`}}/></i></div><small>Every unclaimed severe case is queued for human review.</small></article><article className="chart-card focus-card"><span className="eyebrow purple-text">Coverage gap</span><strong>{missed}</strong><h3>Potentially missed beneficiaries</h3><p>Severe damage evidence with no corresponding claim.</p><div><AlertTriangle/>Field verification recommended</div></article></div></section>; }
 
 function AlertsView({farms,onOpen}:{farms:Farm[];onOpen:(f:Farm)=>void}) { return <section className="page-panel alerts-page"><div className="section-head"><div><span className="eyebrow">Action queue</span><h2>{farms.length} farms need attention</h2><p>Ranked for human field verification—not automatic claim decisions.</p></div></div><div className="alert-list">{farms.sort((a,b)=>(a.Potentially_Missed?-2:a.Evidence_Mismatch?-1:0)-(b.Potentially_Missed?-2:b.Evidence_Mismatch?-1:0)).map(f=><article key={f.Farm_ID} className={f.Potentially_Missed?'missed-alert':''}><span className="alert-symbol">{f.Potentially_Missed?<AlertTriangle/>:f.Evidence_Mismatch?<SlidersHorizontal/>:<ShieldCheck/>}</span><div><span className="eyebrow">{f.Potentially_Missed?'High priority':f.Evidence_Mismatch?'Review':'Verify'} <b>{f.Farm_ID}</b></span><h3>{f.Potentially_Missed?'Potentially missed beneficiary':f.Evidence_Mismatch?'Claim and evidence mismatch':'Severe damage evidence'}</h3><p>{f.AI_Damage_Percent}% AI damage, {f.Claim_Submitted==='No'?'no corresponding claim':`${f.Claimed_Damage}% claimed damage`}, {f.AI_Confidence}% confidence</p></div><button onClick={()=>onOpen(f)}>Open evidence</button></article>)}</div></section>; }
