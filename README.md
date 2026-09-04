@@ -28,4 +28,9 @@ Farm boundaries and claim records in this prototype are **synthetic demonstratio
 Satellite imagery via Esri World Imagery and NASA GIBS, farm boundary and damage overlays on an interactive map, with the underlying design built around a Sentinel-1 (flood/radar) + Sentinel-2 (vegetation/NDVI) + AI change-detection pipeline as the intended production data source.
 
 ## Team
-n1vd — TerraAid
+Adwaith
+Hrithika
+Nived Krishna
+Nived Ravi
+Niveditha
+Rishith
