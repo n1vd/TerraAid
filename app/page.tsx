@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type * as Leaflet from 'leaflet';
-import { AlertTriangle, BarChart3, Bell, CalendarDays, CheckCircle2, Crosshair, Database, FileText, Info, Layers3, Leaf, Map as MapIcon, MapPin, RefreshCw, Satellite, Search, ShieldCheck, SlidersHorizontal, XCircle } from 'lucide-react';
+import { AlertTriangle, BarChart3, CalendarDays, Crosshair, Database, Info, Layers3, Leaf, MapPin, RefreshCw, Satellite, Search, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 type Priority = 'HIGH' | 'MEDIUM' | 'LOW';
@@ -50,7 +50,7 @@ const severity = (farm: Farm): Damage => farm.AI_Damage_Percent >= 70 ? 'Severe'
 const colorFor = (farm: Farm) => farm.Potentially_Missed ? '#9775C9' : severity(farm)==='Severe' ? '#D95C59' : severity(farm)==='Moderate' ? '#D9A441' : '#5EAD78';
 
 function SatelliteMap({ farms, selected, onSelect, date, location, layers, onStatus }: {
-  farms: Farm[]; selected: Farm; onSelect: (farm: Farm) => void; date: string;
+  farms: Farm[]; selected: Farm|null; onSelect: (farm: Farm) => void; date: string;
   location: {lat:number; lon:number; name:string}; layers: Record<string,boolean>;
   onStatus: (status:'loading'|'available'|'unavailable') => void;
 }) {
@@ -110,13 +110,13 @@ function SatelliteMap({ farms, selected, onSelect, date, location, layers, onSta
     farms.forEach((farm,index) => {
       const [lat,lon]=farm.center, sx=.0046+(index%3)*.0005, sy=.0055+(index%2)*.0006;
       const points: Leaflet.LatLngExpression[] = [[lat-sx,lon-sy],[lat+sx*.78,lon-sy*.84],[lat+sx,lon+sy*.82],[lat-sx*.72,lon+sy]];
-      const active=farm.Farm_ID===selected.Farm_ID;
+      const active=farm.Farm_ID===selected?.Farm_ID;
       const polygon=L.polygon(points,{color:active?'#ffffff':colorFor(farm),fillColor:colorFor(farm),fillOpacity:farm.Potentially_Missed?.38:.34,weight:active?2.5:1.7});
-      polygon.bindTooltip(`<b>${farm.Farm_ID}</b> · ${severity(farm)}<br>${farm.AI_Damage_Percent}% AI damage`,{direction:'top',offset:[0,-4]});
+      polygon.bindTooltip(`<b>${farm.Farm_ID}</b><br>${severity(farm)} damage, ${farm.AI_Damage_Percent}% assessed`,{direction:'top',offset:[0,-4]});
       polygon.on('click',()=>onSelect(farm));
       polygon.addTo(group);
     });
-  }, [farms, selected.Farm_ID, layers.farms, ready, onSelect]);
+  }, [farms, selected?.Farm_ID, layers.farms, ready, onSelect]);
   return <div ref={elRef} className="leaflet-host" aria-label="Interactive NASA GIBS satellite map with synthetic farm boundaries" />;
 }
 
@@ -126,7 +126,8 @@ export default function Home() {
   const [priority,setPriority]=useState<'All'|Priority>('All');
   const [claim,setClaim]=useState<'All'|'Yes'|'No'>('All');
   const [damage,setDamage]=useState<'All'|Damage>('All');
-  const [selected,setSelected]=useState(FARMS.find(f=>f.Farm_ID==='F018')!);
+  const [selected,setSelected]=useState<Farm|null>(null);
+  const [filtersOpen,setFiltersOpen]=useState(false);
   const [date,setDate]=useState(latestDate());
   const [imageryStatus,setImageryStatus]=useState<'loading'|'available'|'unavailable'>('loading');
   const [location,setLocation]=useState({lat:15.1394,lon:76.9214,name:'Ballari, Karnataka'});
@@ -150,11 +151,11 @@ export default function Home() {
     finally { setSearching(false); }
   };
   const useCoords=() => { const match=query.split(',').map(Number); if(match.length===2&&match.every(Number.isFinite)){setLocation({lat:match[0],lon:match[1],name:`${match[0].toFixed(4)}, ${match[1].toFixed(4)}`});setLocationError('');} else setLocationError('Enter coordinates as latitude, longitude.'); };
-  const selectQuick=(next:'all'|'missed'|'mismatch') => {setQuick(next); if(next==='missed'){const f=FARMS.find(x=>x.Farm_ID==='F018')!;setSelected(f);} };
+  const selectQuick=(next:'all'|'missed'|'mismatch') => setQuick(next);
   const clearFilters=()=>{setQuick('all');setPriority('All');setClaim('All');setDamage('All');};
   const selectFarm=(farm:Farm)=>setSelected(farm);
   const filteredClaims=FARMS.filter(f=>f.Farm_ID.toLowerCase().includes(claimSearch.toLowerCase()));
-  const nav=[['overview','Overview',Layers3],['map','Map',MapIcon],['claims','Claims',FileText],['analytics','Analytics',BarChart3],['alerts','Alerts',Bell]] as const;
+  const nav=[['overview','Overview'],['map','Map'],['claims','Claims'],['analytics','Analytics'],['alerts','Alerts']] as const;
   const metrics=[['Farms analysed',counts.all],['Severely affected',counts.severe],['Claims received',counts.claims],['Potentially missed',counts.missed],['High priority',counts.high]];
   const severeAll=FARMS.filter(f=>severity(f)==='Severe');
   const severeClaimed=severeAll.filter(f=>f.Claim_Submitted==='Yes').length;
@@ -163,43 +164,42 @@ export default function Home() {
   return <main className="shell">
     <header className="topbar">
       <button className="brand" onClick={()=>setView('overview')}><span className="brand-mark"><Leaf size={19}/></span><strong>TerraAid</strong></button>
-      <nav aria-label="Primary navigation">{nav.map(([id,label,Icon])=><button key={id} className={view===id?'active':''} onClick={()=>setView(id)}><Icon size={14}/>{label}</button>)}</nav>
-      <div className="source-pill"><i/> Satellite connected</div>
+      <nav aria-label="Primary navigation">{nav.map(([id,label])=><button key={id} className={view===id?'active':''} onClick={()=>setView(id)}>{label}</button>)}</nav>
     </header>
     <section className="intro">
-      <div><h1>{view==='overview'||view==='map'?'Flood Impact Overview':view==='claims'?'Claims Review':view==='analytics'?'Damage Analytics':'Verification Alerts'}</h1><p>{location.name} <span aria-hidden="true">/</span> Post-Flood Agricultural Assessment</p></div>
+      <div><h1>{view==='overview'||view==='map'?'Flood Impact Overview':view==='claims'?'Claims Review':view==='analytics'?'Damage Analytics':'Verification Alerts'}</h1><p><strong>{location.name}</strong><span>Post-flood agricultural assessment</span></p></div>
       <Dialog><DialogTrigger className="method"><Info size={14}/> Data &amp; method</DialogTrigger><DialogContent className="method-dialog"><DialogHeader><DialogTitle>Data &amp; method</DialogTitle><DialogDescription>TerraAid supports authorised human decisions; it does not approve or reject claims.</DialogDescription></DialogHeader><div className="method-list"><div><Satellite/><span><b>Satellite imagery</b><small>NASA GIBS MODIS Terra True Color. Historical date requests are sent to the live WMS service.</small></span></div><div><BarChart3/><span><b>Damage analysis</b><small>May combine flood evidence, vegetation change and automated change detection.</small></span></div><div><Database/><span><b>Prototype records</b><small>Claims and farm boundaries are synthetic demonstration data—not official cadastral parcels.</small></span></div><div><ShieldCheck/><span><b>Human authority</b><small>Field verification and final relief decisions remain with authorised officials.</small></span></div></div></DialogContent></Dialog>
     </section>
     {(view==='overview'||view==='map') && <>
-      <section className="metric-grid">{metrics.map(([label,value],index)=><article className={`metric ${index===3?'critical':''}`} key={label}><span>{label}</span><strong>{value}</strong></article>)}</section>
+      <section className="metric-grid">{metrics.map(([label,value],index)=><article className={`metric ${index===3?'critical':''}`} key={label}><strong>{value}</strong><span>{label}</span></article>)}</section>
       <section className="workspace">
-        <aside className="filters">
-          <div className="panel-heading"><span>Filters</span><button onClick={clearFilters}>Reset</button></div>
-          <button className={quick==='missed'?'filter-active':''} onClick={()=>selectQuick('missed')}><b>Potentially missed</b><small>Severe damage + no claim</small><em>{FARMS.filter(f=>f.Potentially_Missed).length}</em></button>
-          <button className={quick==='all'?'filter-active all-filter':''} onClick={()=>selectQuick('all')}><b>All assessed farms</b><small>Complete assessment</small><em>{FARMS.length}</em></button>
-          <button className={quick==='mismatch'?'filter-active':''} onClick={()=>selectQuick('mismatch')}><b>Evidence mismatch</b><small>Closer review advised</small><em>{FARMS.filter(f=>f.Evidence_Mismatch).length}</em></button>
-          <div className="filter-group"><label>Priority</label><select value={priority} onChange={e=>setPriority(e.target.value as typeof priority)}><option>All</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select></div>
-          <div className="filter-group"><label>Claim status</label><select value={claim} onChange={e=>setClaim(e.target.value as typeof claim)}><option value="All">All</option><option value="Yes">Submitted</option><option value="No">No claim</option></select></div>
-          <div className="filter-group"><label>Damage evidence</label><select value={damage} onChange={e=>setDamage(e.target.value as typeof damage)}><option>All</option><option>Severe</option><option>Moderate</option><option>Low</option></select></div>
-          <div className="layers"><label><input type="checkbox" checked={layers.satellite} onChange={()=>setLayers({...layers,satellite:!layers.satellite})}/><Satellite/>Satellite</label><label><input type="checkbox" checked={layers.farms} onChange={()=>setLayers({...layers,farms:!layers.farms})}/><Layers3/>Farm damage</label><label><input type="checkbox" checked={layers.flood} onChange={()=>setLayers({...layers,flood:!layers.flood})}/><span className="layer-dot blue"/>Flood extent</label><label><input type="checkbox" checked={layers.labels} onChange={()=>setLayers({...layers,labels:!layers.labels})}/><MapPin/>Labels</label></div>
-          <div className="data-badges"><span>Satellite: live</span><span>Claims: demo</span><span>Boundaries: demo</span><span>Analysis: prototype</span></div>
-        </aside>
         <section className="map-card">
           <div className="map-toolbar">
+            <button className="filter-toggle" onClick={()=>setFiltersOpen(v=>!v)} aria-expanded={filtersOpen}><SlidersHorizontal size={14}/>Filters</button>
             <form className="searchbox" onSubmit={searchLocation}><Search size={14}/><input aria-label="Search district, village or location" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search district, village or location…"/><button disabled={searching}>{searching?'Searching…':'Search'}</button></form>
             <label className="date-control"><CalendarDays size={13}/><input aria-label="Satellite date" type="date" value={date} max={latestDate()} onInput={e=>setDate(e.currentTarget.value)}/></label>
             <button className="latest" onClick={()=>setDate(latestDate())}><Satellite size={13}/>Latest available</button>
+            <span className={`map-status ${imageryStatus}`}><i/>{imageryStatus==='available'?'Satellite available':imageryStatus==='loading'?'Loading imagery':'Imagery unavailable'} <b>{visible.length} farms</b></span>
           </div>
           {locationError && <div className="location-error"><AlertTriangle size={13}/>{locationError}<button onClick={useCoords}>Use as coordinates</button></div>}
           <div className="map-stage">
             <SatelliteMap farms={visible} selected={selected} onSelect={selectFarm} date={date} location={location} layers={layers} onStatus={setImageryStatus}/>
-            <div className={`imagery-note ${imageryStatus}`}><span className="status-icon">{imageryStatus==='loading'?<RefreshCw/>:imageryStatus==='available'?<CheckCircle2/>:<XCircle/>}</span><span><b>Satellite imagery — {imageryStatus==='available'?'available':imageryStatus==='loading'?'requesting date':'temporarily unavailable'}</b><small>NASA GIBS · MODIS Terra True Color · requested {date}</small></span><em>{visible.length} farms visible</em></div>
             {imageryStatus==='unavailable'&&<div className="satellite-error"><AlertTriangle/><b>Live satellite imagery temporarily unavailable.</b><small>Farm overlays remain visible. Try a nearby date.</small><button onClick={()=>{setImageryStatus('loading');satelliteRefocusHack(date,setDate)}}><RefreshCw/>Retry</button></div>}
-            <div className="legend"><b>Damage evidence</b><span><i className="purple"/>Potentially missed</span><span><i className="red"/>Severe</span><span><i className="amber"/>Moderate</span><span><i className="green"/>Low / minor</span><span><i className="blue"/>Flood extent</span></div>
+            {filtersOpen&&<aside className="filters">
+              <div className="panel-heading"><span>Filters and layers</span><div><button onClick={clearFilters}>Reset</button><button onClick={()=>setFiltersOpen(false)}>Close</button></div></div>
+              <button className={quick==='missed'?'filter-active':''} onClick={()=>selectQuick('missed')}><b>Potentially missed</b><small>Severe damage and no claim</small><em>{FARMS.filter(f=>f.Potentially_Missed).length}</em></button>
+              <button className={quick==='all'?'filter-active all-filter':''} onClick={()=>selectQuick('all')}><b>All assessed farms</b><small>Complete assessment</small><em>{FARMS.length}</em></button>
+              <button className={quick==='mismatch'?'filter-active':''} onClick={()=>selectQuick('mismatch')}><b>Evidence mismatch</b><small>Closer review advised</small><em>{FARMS.filter(f=>f.Evidence_Mismatch).length}</em></button>
+              <div className="filter-group"><label>Priority</label><select value={priority} onChange={e=>setPriority(e.target.value as typeof priority)}><option>All</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select></div>
+              <div className="filter-group"><label>Claim status</label><select value={claim} onChange={e=>setClaim(e.target.value as typeof claim)}><option value="All">All</option><option value="Yes">Submitted</option><option value="No">No claim</option></select></div>
+              <div className="filter-group"><label>Damage evidence</label><select value={damage} onChange={e=>setDamage(e.target.value as typeof damage)}><option>All</option><option>Severe</option><option>Moderate</option><option>Low</option></select></div>
+              <div className="layers"><label><input type="checkbox" checked={layers.satellite} onChange={()=>setLayers({...layers,satellite:!layers.satellite})}/><Satellite/>Satellite</label><label><input type="checkbox" checked={layers.farms} onChange={()=>setLayers({...layers,farms:!layers.farms})}/><Layers3/>Farm damage</label><label><input type="checkbox" checked={layers.flood} onChange={()=>setLayers({...layers,flood:!layers.flood})}/><span className="layer-dot blue"/>Flood extent</label><label><input type="checkbox" checked={layers.labels} onChange={()=>setLayers({...layers,labels:!layers.labels})}/><MapPin/>Labels</label></div>
+            </aside>}
+            <div className="legend"><b>Damage evidence</b><span><i className="red"/>Severely affected</span><span><i className="amber"/>Moderately affected</span><span><i className="green"/>No or minor damage</span><span><i className="purple"/>Potentially missed</span><span><i className="blue"/>Flooded area</span></div>
+            {selected&&<FarmPanel farm={selected} onClose={()=>setSelected(null)}/>} 
           </div>
-          <footer><span><Crosshair size={11}/>{location.lat.toFixed(4)}, {location.lon.toFixed(4)}</span><span>NASA Earthdata · OpenStreetMap attribution</span></footer>
+          <footer><span><Crosshair size={11}/>{location.lat.toFixed(4)}, {location.lon.toFixed(4)}</span><span>NASA Earthdata and OpenStreetMap</span></footer>
         </section>
-        <FarmPanel farm={selected}/>
       </section>
     </>}
     {view==='claims'&&<ClaimsView farms={filteredClaims} search={claimSearch} onSearch={setClaimSearch} onOpen={farm=>{setSelected(farm);setView('map');}}/>}
@@ -210,17 +210,17 @@ export default function Home() {
 
 function satelliteRefocusHack(date:string,setDate:(v:string)=>void){ setDate(date==='2000-01-01'?latestDate():'2000-01-01'); setTimeout(()=>setDate(date),0); }
 
-function FarmPanel({farm}:{farm:Farm}) { return <aside className={`priority-card ${farm.Potentially_Missed?'missed-card':''}`}>
-  <span className="panel-kicker">{farm.Potentially_Missed?'Priority case':'Selected farm'}</span><div className="farm-title"><span>{farm.Farm_ID}</span><em className={`priority-${farm.Priority.toLowerCase()}`}>{farm.Priority.toLowerCase()}</em></div>
+function FarmPanel({farm,onClose}:{farm:Farm;onClose:()=>void}) { return <aside className={`priority-card ${farm.Potentially_Missed?'missed-card':''}`}>
+  <div className="detail-head"><span className="panel-kicker">{farm.Potentially_Missed?'Priority case':'Selected farm'}</span><button onClick={onClose}>Close</button></div><div className="farm-title"><span>{farm.Farm_ID}</span><em className={`priority-${farm.Priority.toLowerCase()}`}>{farm.Priority.toLowerCase()} priority</em></div>
   <h2>{farm.Potentially_Missed?'Potentially missed beneficiary':farm.Evidence_Mismatch?'Evidence mismatch':'Evidence summary'}</h2><p>{farm.Potentially_Missed?'Strong satellite evidence of flood damage with no corresponding claim record.':farm.Evidence_Mismatch?'Claim and satellite evidence differ materially. Closer verification recommended.':`${farm.Crop} farm with ${severity(farm).toLowerCase()} assessed damage.`}</p>
   <div className="farm-meta"><span><Leaf/> {farm.Crop}</span><span>{farm.Area} acres</span></div>
   <div className="evidence-grid"><div><span>Flood exposure</span><strong>{farm.Flood_Percent}%</strong><i style={{width:`${farm.Flood_Percent}%`}}/></div><div><span>AI damage</span><strong>{farm.AI_Damage_Percent}%</strong><i style={{width:`${farm.AI_Damage_Percent}%`}}/></div><div><span>Vegetation decline</span><strong>{farm.NDVI_Change}%</strong><i style={{width:`${farm.NDVI_Change}%`}}/></div><div><span>AI confidence</span><strong>{farm.AI_Confidence}%</strong><i style={{width:`${farm.AI_Confidence}%`}}/></div></div>
   <div className="no-claim"><span>Claim submitted</span><strong>{farm.Claim_Submitted.toUpperCase()}</strong></div>{farm.Claim_Submitted==='Yes'&&<div className="claim-compare"><span>Claimed damage</span><strong>{farm.Claimed_Damage}%</strong></div>}
-  <button className="verify">{farm.Potentially_Missed?'Field verification recommended':'Open field brief'} <span>→</span></button><small className="human-note">TerraAid does not approve or reject claims. It tells field teams which farm needs attention first.</small>
+  <button className="verify">{farm.Potentially_Missed?'Recommend field verification':'Open field brief'}</button><small className="human-note">TerraAid provides decision support. Final relief decisions remain with authorised officials.</small>
  </aside>; }
 
-function ClaimsView({farms,search,onSearch,onOpen}:{farms:Farm[];search:string;onSearch:(v:string)=>void;onOpen:(f:Farm)=>void}) { return <section className="page-panel"><div className="section-head"><div><span className="eyebrow">Claim and evidence review</span><h2>Claims register</h2><p>Synthetic claim records compared with prototype satellite analysis.</p></div><div className="table-search"><Search/><input value={search} onChange={e=>onSearch(e.target.value)} placeholder="Search Farm ID…"/></div></div><div className="table-wrap"><table><thead><tr><th>Farm ID</th><th>Crop</th><th>Claim</th><th>Claimed damage</th><th>AI damage</th><th>Mismatch</th><th>Priority</th><th/></tr></thead><tbody>{farms.map(f=><tr key={f.Farm_ID}><td><b>{f.Farm_ID}</b></td><td>{f.Crop}</td><td><span className={`table-status ${f.Claim_Submitted==='No'?'no':''}`}>{f.Claim_Submitted==='Yes'?'Submitted':'No claim'}</span></td><td>{f.Claim_Submitted==='Yes'?`${f.Claimed_Damage}%`:'—'}</td><td>{f.AI_Damage_Percent}%</td><td>{f.Evidence_Mismatch?<span className="mismatch-chip">Review</span>:'Aligned'}</td><td><span className={`priority-chip priority-${f.Priority.toLowerCase()}`}>{f.Priority.toLowerCase()}</span></td><td><button onClick={()=>onOpen(f)}>View on map →</button></td></tr>)}</tbody></table></div><div className="legal-note"><ShieldCheck/>Satellite evidence is decision support, not legal or automatic claim determination.</div></section>; }
+function ClaimsView({farms,search,onSearch,onOpen}:{farms:Farm[];search:string;onSearch:(v:string)=>void;onOpen:(f:Farm)=>void}) { return <section className="page-panel"><div className="section-head"><div><span className="eyebrow">Claim and evidence review</span><h2>Claims register</h2><p>Synthetic claim records compared with prototype satellite analysis.</p></div><div className="table-search"><Search/><input value={search} onChange={e=>onSearch(e.target.value)} placeholder="Search Farm ID…"/></div></div><div className="table-wrap"><table><thead><tr><th>Farm ID</th><th>Crop</th><th>Claim</th><th>Claimed damage</th><th>AI damage</th><th>Mismatch</th><th>Priority</th><th/></tr></thead><tbody>{farms.map(f=><tr key={f.Farm_ID}><td><b>{f.Farm_ID}</b></td><td>{f.Crop}</td><td><span className={`table-status ${f.Claim_Submitted==='No'?'no':''}`}>{f.Claim_Submitted==='Yes'?'Submitted':'No claim'}</span></td><td>{f.Claim_Submitted==='Yes'?`${f.Claimed_Damage}%`:'—'}</td><td>{f.AI_Damage_Percent}%</td><td>{f.Evidence_Mismatch?<span className="mismatch-chip">Review</span>:'Aligned'}</td><td><span className={`priority-chip priority-${f.Priority.toLowerCase()}`}>{f.Priority.toLowerCase()}</span></td><td><button onClick={()=>onOpen(f)}>View on map</button></td></tr>)}</tbody></table></div><div className="legal-note"><ShieldCheck/>Satellite evidence is decision support, not legal or automatic claim determination.</div></section>; }
 
 function AnalyticsView({severityCounts,severeClaimed,severeTotal}:{severityCounts:{severe:number;moderate:number;low:number};severeClaimed:number;severeTotal:number}) { const total=severityCounts.severe+severityCounts.moderate+severityCounts.low; const missed=FARMS.filter(f=>f.Potentially_Missed).length; return <section className="page-panel analytics"><div className="section-head"><div><span className="eyebrow">District evidence summary</span><h2>Damage intelligence</h2><p>Decision-relevant indicators from the current synthetic assessment.</p></div></div><div className="analytics-grid"><article className="chart-card"><div><span>Damage severity</span><strong>{total} farms</strong></div><div className="donut" style={{background:`conic-gradient(#D95C59 0 ${severityCounts.severe/total*100}%,#D9A441 0 ${(severityCounts.severe+severityCounts.moderate)/total*100}%,#5EAD78 0)`}}><span>{severityCounts.severe}<small>severe</small></span></div><ul><li><i className="red"/>Severe <b>{severityCounts.severe}</b></li><li><i className="amber"/>Moderate <b>{severityCounts.moderate}</b></li><li><i className="green"/>Low / minor <b>{severityCounts.low}</b></li></ul></article><article className="chart-card bars-card"><div><span>Claims among severe farms</span><strong>{severeTotal} severe cases</strong></div><div className="bar-item"><label><span>Claim submitted</span><b>{severeClaimed}</b></label><i><em style={{width:`${severeClaimed/severeTotal*100}%`}}/></i></div><div className="bar-item no-claim-bar"><label><span>No claim</span><b>{severeTotal-severeClaimed}</b></label><i><em style={{width:`${(severeTotal-severeClaimed)/severeTotal*100}%`}}/></i></div><small>Every unclaimed severe case is queued for human review.</small></article><article className="chart-card focus-card"><span className="eyebrow purple-text">Coverage gap</span><strong>{missed}</strong><h3>Potentially missed beneficiaries</h3><p>Severe damage evidence with no corresponding claim.</p><div><AlertTriangle/>Field verification recommended</div></article></div></section>; }
 
-function AlertsView({farms,onOpen}:{farms:Farm[];onOpen:(f:Farm)=>void}) { return <section className="page-panel alerts-page"><div className="section-head"><div><span className="eyebrow">Action queue</span><h2>{farms.length} farms need attention</h2><p>Ranked for human field verification—not automatic claim decisions.</p></div></div><div className="alert-list">{farms.sort((a,b)=>(a.Potentially_Missed?-2:a.Evidence_Mismatch?-1:0)-(b.Potentially_Missed?-2:b.Evidence_Mismatch?-1:0)).map(f=><article key={f.Farm_ID} className={f.Potentially_Missed?'missed-alert':''}><span className="alert-symbol">{f.Potentially_Missed?<AlertTriangle/>:f.Evidence_Mismatch?<SlidersHorizontal/>:<ShieldCheck/>}</span><div><span className="eyebrow">{f.Potentially_Missed?'High priority':f.Evidence_Mismatch?'Review':'Verify'} · {f.Farm_ID}</span><h3>{f.Potentially_Missed?'Potentially missed beneficiary':f.Evidence_Mismatch?'Claim / evidence mismatch':'Severe damage evidence'}</h3><p>{f.AI_Damage_Percent}% AI damage · {f.Claim_Submitted==='No'?'No corresponding claim':`${f.Claimed_Damage}% claimed damage`} · {f.AI_Confidence}% confidence</p></div><button onClick={()=>onOpen(f)}>Open evidence →</button></article>)}</div></section>; }
+function AlertsView({farms,onOpen}:{farms:Farm[];onOpen:(f:Farm)=>void}) { return <section className="page-panel alerts-page"><div className="section-head"><div><span className="eyebrow">Action queue</span><h2>{farms.length} farms need attention</h2><p>Ranked for human field verification—not automatic claim decisions.</p></div></div><div className="alert-list">{farms.sort((a,b)=>(a.Potentially_Missed?-2:a.Evidence_Mismatch?-1:0)-(b.Potentially_Missed?-2:b.Evidence_Mismatch?-1:0)).map(f=><article key={f.Farm_ID} className={f.Potentially_Missed?'missed-alert':''}><span className="alert-symbol">{f.Potentially_Missed?<AlertTriangle/>:f.Evidence_Mismatch?<SlidersHorizontal/>:<ShieldCheck/>}</span><div><span className="eyebrow">{f.Potentially_Missed?'High priority':f.Evidence_Mismatch?'Review':'Verify'} <b>{f.Farm_ID}</b></span><h3>{f.Potentially_Missed?'Potentially missed beneficiary':f.Evidence_Mismatch?'Claim and evidence mismatch':'Severe damage evidence'}</h3><p>{f.AI_Damage_Percent}% AI damage, {f.Claim_Submitted==='No'?'no corresponding claim':`${f.Claimed_Damage}% claimed damage`}, {f.AI_Confidence}% confidence</p></div><button onClick={()=>onOpen(f)}>Open evidence</button></article>)}</div></section>; }
