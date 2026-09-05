@@ -15,6 +15,7 @@ type Farm = {
 };
 type RegionId = 'ballari'|'sitapur'|'dhemaji';
 type Region = {id:RegionId; name:string; lat:number; lon:number; zoom:number; updated:string; farms:Farm[]; floodBoundary:[number,number][]};
+const VERIFICATION_STORAGE_KEY = 'terraaid-demo-verification-requests';
 
 const rawFarms: Omit<Farm, 'boundary'>[] = [
   {Farm_ID:'F001',Crop:'Paddy',Area:2.1,Flood_Percent:24,NDVI_Change:18,AI_Damage_Percent:28,AI_Confidence:88,Claim_Submitted:'Yes',Claimed_Damage:25,Potentially_Missed:false,Evidence_Mismatch:false,Priority:'LOW',Alert:'Monitor'},
@@ -183,6 +184,17 @@ export default function Home() {
   const [signedIn,setSignedIn]=useState(true);
   const [emailAlerts,setEmailAlerts]=useState(true);
   const [autoRefresh,setAutoRefresh]=useState(true);
+  const [verificationRequests,setVerificationRequests]=useState<Record<string,true>>(()=>{
+    if(typeof window==='undefined') return {};
+    try{
+      const saved=JSON.parse(localStorage.getItem(VERIFICATION_STORAGE_KEY)||'[]');
+      return Array.isArray(saved)?Object.fromEntries(saved.filter((id):id is string=>typeof id==='string').map(id=>[id,true])):{};
+    }catch{return {}}
+  });
+  const [verificationSubmitting,setVerificationSubmitting]=useState<string|null>(null);
+  const [notice,setNotice]=useState<{title:string;description:string}|null>(null);
+  const verificationTimerRef=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const noticeTimerRef=useRef<ReturnType<typeof setTimeout>|null>(null);
   const currentRegion=REGIONS[regionId];
   const farms=currentRegion.farms;
 
@@ -209,6 +221,33 @@ export default function Home() {
   const clearFilters=()=>{setQuick('all');setPriority('All');setClaim('All');setDamage('All');};
   const selectFarm=(farm:Farm)=>setSelected(farm);
   const openFarmOnMap=(farm:Farm)=>{setSelected(farm);setFiltersOpen(false);showView('overview');};
+  const showNotice=(title:string,description:string,timeout=4000)=>{
+    if(noticeTimerRef.current)clearTimeout(noticeTimerRef.current);
+    setNotice({title,description});
+    noticeTimerRef.current=setTimeout(()=>{setNotice(null);noticeTimerRef.current=null},timeout);
+  };
+  const requestFieldVerification=(farm:Farm)=>{
+    if(verificationRequests[farm.Farm_ID]||verificationSubmitting) return;
+    setVerificationSubmitting(farm.Farm_ID);
+    verificationTimerRef.current=setTimeout(()=>{
+      setVerificationRequests(current=>{
+        const next:Record<string,true>={...current,[farm.Farm_ID]:true};
+        try{localStorage.setItem(VERIFICATION_STORAGE_KEY,JSON.stringify(Object.keys(next)))}catch{}
+        return next;
+      });
+      setVerificationSubmitting(null);
+      verificationTimerRef.current=null;
+      showNotice('Field verification requested',`Request submitted for ${farm.Farm_ID}.`,4500);
+    },850);
+  };
+  const resetDemoData=()=>{
+    if(verificationTimerRef.current){clearTimeout(verificationTimerRef.current);verificationTimerRef.current=null}
+    setVerificationSubmitting(null);
+    setVerificationRequests({});
+    try{localStorage.removeItem(VERIFICATION_STORAGE_KEY)}catch{}
+    setAccountMenuOpen(false);
+    showNotice('Demo data reset','Field verification requests cleared across all regions.',3500);
+  };
   const filteredClaims=farms.filter(f=>f.Farm_ID.toLowerCase().includes(claimSearch.toLowerCase()));
   const nav=[
     {id:'overview' as const,label:'Overview',icon:<LayoutDashboard/>},
@@ -231,6 +270,7 @@ export default function Home() {
   const alertCount=farms.filter(f=>f.Potentially_Missed).length;
 
   useEffect(()=>{const close=(event:KeyboardEvent)=>{if(event.key==='Escape')setAccountMenuOpen(false)};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close)},[]);
+  useEffect(()=>()=>{if(verificationTimerRef.current)clearTimeout(verificationTimerRef.current);if(noticeTimerRef.current)clearTimeout(noticeTimerRef.current)},[]);
 
   if(!signedIn) return <main className="signed-out-page"><section className="signed-out-card"><span className="brand-mark"><Leaf size={22}/></span><span className="eyebrow">TerraAid secure workspace</span><h1>You’re signed out</h1><p>Your prototype session has ended safely. Sign back in to continue reviewing regional flood evidence.</p><button onClick={()=>setSignedIn(true)}>Sign back in as AD</button></section></main>;
 
@@ -249,7 +289,8 @@ export default function Home() {
             {accountMenuOpen&&<div className="account-menu" role="menu">
               <div className="account-menu-label"><strong>Admin Officer</strong><small>District relief authority</small></div><hr/>
               <button role="menuitem" onClick={()=>{setAccountPanel('profile');setAccountMenuOpen(false)}}><UserRound/>Profile</button>
-              <button role="menuitem" onClick={()=>{setAccountPanel('settings');setAccountMenuOpen(false)}}><Settings/>Settings</button><hr/>
+              <button role="menuitem" onClick={()=>{setAccountPanel('settings');setAccountMenuOpen(false)}}><Settings/>Settings</button>
+              <button role="menuitem" onClick={resetDemoData}><RefreshCw/>Reset demo data</button><hr/>
               <button className="danger" role="menuitem" onClick={()=>{setAccountPanel(null);setAccountMenuOpen(false);setSignedIn(false)}}><LogOut/>Log out</button>
             </div>}
           </div>
@@ -298,7 +339,7 @@ export default function Home() {
               <div className="layers"><label><input type="checkbox" checked={layers.satellite} onChange={()=>setLayers({...layers,satellite:!layers.satellite})}/><Satellite/>Satellite imagery</label><label><input type="checkbox" checked={layers.farms} onChange={()=>setLayers({...layers,farms:!layers.farms})}/><Layers3/>Farm damage</label><label><input type="checkbox" checked={layers.flood} onChange={()=>setLayers({...layers,flood:!layers.flood})}/><span className="layer-dot blue"/>Flood extent</label><label><input type="checkbox" checked={layers.labels} onChange={()=>setLayers({...layers,labels:!layers.labels})}/><MapPin/>Place labels</label></div>
             </aside>}
             <div className="legend"><b>Damage evidence</b><span><i className="red"/>Severely affected</span><span><i className="amber"/>Moderately affected</span><span><i className="green"/>No or minor damage</span><span><i className="purple"/>Potentially missed</span><span><i className="blue"/>Flooded area</span></div>
-            {selected&&<FarmPanel farm={selected} onClose={()=>setSelected(null)}/>}
+            {selected&&<FarmPanel farm={selected} onClose={()=>setSelected(null)} requested={Boolean(verificationRequests[selected.Farm_ID])} submitting={verificationSubmitting===selected.Farm_ID} onRecommend={()=>requestFieldVerification(selected)}/>}
           </div>
           <footer><span><Crosshair size={11}/>{currentRegion.lat.toFixed(4)}, {currentRegion.lon.toFixed(4)}</span><span>Esri World Imagery, NASA Earthdata and OpenStreetMap</span></footer>
         </section>
@@ -314,18 +355,19 @@ export default function Home() {
         {accountPanel==='profile'?<div className="profile-card"><span>AD</span><div><strong>Admin Officer</strong><small><Mail/> admin@terraaid.in</small><small><ShieldCheck/> District relief authority</small></div></div>:<div className="settings-list"><label><span><strong>Email priority alerts</strong><small>Receive potentially missed beneficiary notifications.</small></span><input type="checkbox" checked={emailAlerts} onChange={e=>setEmailAlerts(e.target.checked)}/></label><label><span><strong>Automatic map refresh</strong><small>Refresh imagery status when the region changes.</small></span><input type="checkbox" checked={autoRefresh} onChange={e=>setAutoRefresh(e.target.checked)}/></label></div>}
       </DialogContent>
     </Dialog>
+    {notice&&<div className="app-toast" aria-live="polite"><CheckCircle2/><span><strong>{notice.title}</strong><small>{notice.description}</small></span><button aria-label="Dismiss notification" onClick={()=>setNotice(null)}><X/></button></div>}
   </main>;
 }
 
 function satelliteRefocusHack(date:string,setDate:(v:string)=>void){ setDate(date==='2000-01-01'?latestDate():'2000-01-01'); setTimeout(()=>setDate(date),0); }
 
-function FarmPanel({farm,onClose}:{farm:Farm;onClose:()=>void}) { return <aside className={`priority-card ${farm.Potentially_Missed?'missed-card':''}`}>
+function FarmPanel({farm,onClose,requested,submitting,onRecommend}:{farm:Farm;onClose:()=>void;requested:boolean;submitting:boolean;onRecommend:()=>void}) { return <aside className={`priority-card ${farm.Potentially_Missed?'missed-card':''}`}>
   <div className="detail-head"><span className="panel-kicker">{farm.Potentially_Missed?'Priority case':'Selected farm'}</span><button onClick={onClose}>Close</button></div><div className="farm-title"><span>{farm.Farm_ID}</span><em className={`priority-${farm.Priority.toLowerCase()}`}>{farm.Priority.toLowerCase()} priority</em></div>
   <h2>{farm.Potentially_Missed?'Potentially missed beneficiary':farm.Evidence_Mismatch?'Evidence mismatch':'Evidence summary'}</h2><p>{farm.Potentially_Missed?'Strong satellite evidence of flood damage with no corresponding claim record.':farm.Evidence_Mismatch?'Claim and satellite evidence differ materially. Closer verification recommended.':`${farm.Crop} farm with ${severity(farm).toLowerCase()} assessed damage.`}</p>
   <div className="farm-meta"><span><Leaf/> {farm.Crop}</span><span>{farm.Area} acres</span></div>
   <div className="evidence-grid"><div><span>Flood exposure</span><strong>{farm.Flood_Percent}%</strong><i style={{width:`${farm.Flood_Percent}%`}}/></div><div><span>AI damage</span><strong>{farm.AI_Damage_Percent}%</strong><i style={{width:`${farm.AI_Damage_Percent}%`}}/></div><div><span>Vegetation decline</span><strong>{farm.NDVI_Change}%</strong><i style={{width:`${farm.NDVI_Change}%`}}/></div><div><span>AI confidence</span><strong>{farm.AI_Confidence}%</strong><i style={{width:`${farm.AI_Confidence}%`}}/></div></div>
   <div className="no-claim"><span>Claim submitted</span><strong>{farm.Claim_Submitted.toUpperCase()}</strong></div>{farm.Claim_Submitted==='Yes'&&<div className="claim-compare"><span>Claimed damage</span><strong>{farm.Claimed_Damage}%</strong></div>}
-  <button className="verify">{farm.Potentially_Missed?'Recommend field verification':'Open field brief'}</button><small className="human-note">TerraAid provides decision support. Final relief decisions remain with authorised officials.</small>
+  <button type="button" className={`verify ${requested?'is-submitted':''}`} disabled={requested||submitting} aria-busy={submitting} data-verification-state={requested?'submitted':submitting?'submitting':'default'} onClick={onRecommend}>{requested?<><CheckCircle2/>Field verification requested</>:submitting?<><RefreshCw className="verify-spinner"/>Submitting request…</>:'Recommend field verification'}</button><small className="human-note">TerraAid provides decision support. Final relief decisions remain with authorised officials.</small>
  </aside>; }
 
 function ClaimsView({farms,search,onSearch,onOpen}:{farms:Farm[];search:string;onSearch:(v:string)=>void;onOpen:(f:Farm)=>void}) { return <section className="page-panel"><div className="section-head"><div><span className="eyebrow">Claim and evidence review</span><h2>Claims register</h2><p>Synthetic claim records compared with prototype satellite analysis.</p></div><div className="table-search"><Search/><input value={search} onChange={e=>onSearch(e.target.value)} placeholder="Search Farm ID…"/></div></div><div className="table-wrap"><table><thead><tr><th>Farm ID</th><th>Crop</th><th>Claim</th><th>Claimed damage</th><th>AI damage</th><th>Mismatch</th><th>Priority</th><th/></tr></thead><tbody>{farms.map(f=><tr key={f.Farm_ID}><td><b>{f.Farm_ID}</b></td><td>{f.Crop}</td><td><span className={`table-status ${f.Claim_Submitted==='No'?'no':''}`}>{f.Claim_Submitted==='Yes'?'Submitted':'No claim'}</span></td><td>{f.Claim_Submitted==='Yes'?`${f.Claimed_Damage}%`:'—'}</td><td>{f.AI_Damage_Percent}%</td><td>{f.Evidence_Mismatch?<span className="mismatch-chip">Review</span>:'Aligned'}</td><td><span className={`priority-chip priority-${f.Priority.toLowerCase()}`}>{f.Priority.toLowerCase()}</span></td><td><button onClick={()=>onOpen(f)}>View on map</button></td></tr>)}</tbody></table></div><div className="legal-note"><ShieldCheck/>Satellite evidence is decision support, not legal or automatic claim determination.</div></section>; }

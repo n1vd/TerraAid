@@ -39,6 +39,7 @@ next-env.d.ts
 /work/
 /.package-stage-*/
 /terraaid-site-*.tar.gz
+/.openai/
 
 # local tooling caches
 /.cache/
